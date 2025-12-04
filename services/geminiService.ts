@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Schema, Type } from "@google/genai";
 import { AudioFile, Fact, FactAnalysis, FactStatus, AnalysisReport, ChatMessage, Transcription } from "../types";
 
@@ -26,7 +27,7 @@ const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: s
  * Cleans repetitive word loops (Stuttering Hallucinations).
  * Example: "mas, mas, mas, mas" -> "mas"
  */
-const cleanRepetitiveLoops = (text: string): string => {
+export const cleanRepetitiveLoops = (text: string): string => {
     if (!text) return "";
     // Detects a word (and optional punctuation/space) repeated 4 or more times
     const loopRegex = /\b(\w+)(?:[\s,.]+\1\b){3,}/gi;
@@ -61,7 +62,7 @@ const formatDialogue = (text: string): string => {
 /**
  * Sanitizes the raw transcription text to remove AI hallucinations, loops, and time-travel artifacts.
  */
-const sanitizeTranscript = (rawText: string): { timestamp: string; seconds: number; text: string }[] => {
+export const sanitizeTranscript = (rawText: string): { timestamp: string; seconds: number; text: string }[] => {
     const segments: { timestamp: string; seconds: number; text: string }[] = [];
     const lines = rawText.split('\n');
     
@@ -156,6 +157,11 @@ const sanitizeTranscript = (rawText: string): { timestamp: string; seconds: numb
  * Transcribes a single audio file with Retry Logic and Recitation Bypass.
  */
 export const transcribeAudio = async (apiKey: string, audioFile: AudioFile): Promise<Transcription> => {
+  // If it's a virtual file (manually imported text), skip API call
+  if (audioFile.isVirtual || !audioFile.file) {
+      throw new Error("Este ficheiro é apenas texto e não pode ser re-transcrito pela API.");
+  }
+
   const ai = new GoogleGenAI({ apiKey: apiKey });
   const model = "gemini-2.5-flash"; 
   let attempt = 0;
@@ -330,37 +336,43 @@ ${t.segments.map(s => `[${s.timestamp}] ${s.text}`).join('\n')}
 `).join('\n');
 
   const systemInstruction = `
-    És um Juiz e Analista Forense.
+    És um Juiz e Analista Forense Rígido.
     
     OBJETIVO:
     Verificar se os FACTOS alegados são confirmados pelos DEPOIMENTOS fornecidos.
     
-    INSTRUÇÕES DE INTELIGÊNCIA:
-    1. **Interpretação Semântica:** Não faças apenas correspondência de palavras. Lê o SENTIDO.
-       - Exemplo: Se o facto é "O carro era vermelho" e a testemunha diz "A viatura tinha a cor de sangue", isto É uma confirmação.
-       - Exemplo: Se o facto é "Ele estava em casa" e a testemunha diz "Ele saiu para o bar", isto É um desmentido.
+    INSTRUÇÕES CRÍTICAS DE RIGOR (LÊ COM ATENÇÃO):
+    1. **Filtro Temporal e Temático Absoluto:**
+       - Se o facto refere um momento específico (ex: "após a operação", "durante o jantar"), IGNORA TUDO o que não seja desse momento exato.
+       - NÃO aceites inferências de outros contextos. Se não há informação sobre aquele momento exato, o resultado é INCONCLUSIVO ou NÃO MENCIONADO.
+       - Exemplo: Se perguntam se "trabalhou no pós-operatório", não interessa se trabalhou no pré-operatório.
     
-    2. **Busca Exaustiva:** Procura em TODOS os ficheiros. Um facto pode ser confirmado por uma pessoa e desmentido por outra (Contraditório).
+    2. **Interpretação Semântica Estrita:** 
+       - Se o depoimento é vago, é INCONCLUSIVO.
+       - Não tentes "salvar" o facto. Se a prova é fraca, diz que é fraca.
     
-    3. **Formatação de Evidências:**
-       - Deves MANDATORIAMENTE listar as evidências na secção EVIDENCES.
-       - Usa a "tag" exata para que o sistema localize o áudio.
-       - Formato: [NomeDoFicheiro.mp3 @ MM:SS]
-       - Para cada afirmação no resumo, indica o carimbo de tempo respetivo.
+    3. **Busca Exaustiva mas Precisa:** 
+       - Procura em TODOS os ficheiros.
+       - Ignora "conversa de café", cumprimentos ou divagações. Queremos a prova material.
+    
+    4. **Formatação de Evidências (OBRIGATÓRIO):**
+       - Deves MANDATORIAMENTE listar as evidências (citações) que fundamentam a decisão.
+       - Usa a "tag" exata: [NomeDoFicheiro.mp3 @ MM:SS]
+       - Se mencionares algo no resumo, tens de fornecer a tag.
     
     OUTPUT JSON-LIKE (Estruturado):
     
     [[FACT]]
     ID: {id_do_facto}
     STATUS: {Confirmado | Desmentido | Inconclusivo/Contraditório | Não Mencionado}
-    SUMMARY: {Explicação detalhada. Identifica quem disse o quê.}
+    SUMMARY: {Resumo curto. Foca APENAS no tema questionado. Se a testemunha divagar, ignora a divagação.}
     EVIDENCES:
     - [Ficheiro.mp3 @ 00:00]
     - [OutroFicheiro.mp3 @ 00:00]
     [[END_FACT]]
     
     [[CONCLUSION]]
-    {Conclusão final global}
+    {Conclusão final global, concisa e focada na consistência da prova.}
     [[END_CONCLUSION]]
   `;
 
@@ -379,7 +391,7 @@ ${t.segments.map(s => `[${s.timestamp}] ${s.text}`).join('\n')}
       config: {
         systemInstruction: systemInstruction,
         maxOutputTokens: 8192,
-        temperature: 0.4, 
+        temperature: 0.1, // Very low temperature for maximum rigor
         thinkingConfig: { thinkingBudget: 1024 },
         safetySettings: [
             { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -407,18 +419,24 @@ ${t.segments.map(s => `[${s.timestamp}] ${s.text}`).join('\n')}
         const idMatch = content.match(/ID:\s*(.*)/);
         const statusMatch = content.match(/STATUS:\s*(.*)/);
         const summaryMatch = content.match(/SUMMARY:\s*([\s\S]*?)EVIDENCES:/);
+        const summaryFallback = content.match(/SUMMARY:\s*([\s\S]*?)$/); // Fallback if EVIDENCES tag is missing
         
-        // Regex to catch [File @ Time] tags
+        // Use the explicit match, or fallback if EVIDENCES label is missing
+        const summaryText = summaryMatch ? summaryMatch[1].trim() : (summaryFallback ? summaryFallback[1].trim() : "");
+
+        // Improved Regex: Scan the ENTIRE block for citations
         const citationRegex = /\[\s*(.*?)\s*@\s*(\d{1,2}:\d{2})\s*\]/g;
         const citations: { audioFileName: string; timestamp: string; text: string }[] = [];
+        const seenCitations = new Set<string>();
         
-        const evidencesSection = content.split('EVIDENCES:')[1] || "";
         let match;
-        
-        while ((match = citationRegex.exec(evidencesSection)) !== null) {
+        while ((match = citationRegex.exec(content)) !== null) {
             const fileName = match[1].trim();
             const timestamp = match[2].trim();
-            if (fileName.length > 2) {
+            const uniqueKey = `${fileName}_${timestamp}`;
+
+            if (fileName.length > 2 && !seenCitations.has(uniqueKey)) {
+                seenCitations.add(uniqueKey);
                 citations.push({ audioFileName: fileName, timestamp: timestamp, text: "" });
             }
         }
@@ -432,7 +450,7 @@ ${t.segments.map(s => `[${s.timestamp}] ${s.text}`).join('\n')}
             else if (statusRaw.includes("desmentido")) status = FactStatus.DENIED;
             else if (statusRaw.includes("inconclusivo") || statusRaw.includes("contraditório")) status = FactStatus.INCONCLUSIVE;
 
-            // --- SOURCE OF TRUTH HYDRATION (STRICT 8 SENTENCES + DIALOGUE FORMATTING) ---
+            // --- SOURCE OF TRUTH HYDRATION ---
             const hydratedCitations = citations.map(c => {
                  const cleanRefName = c.audioFileName.toLowerCase().replace(/\.(mp3|wav|m4a)$/, '').trim();
                  
@@ -442,33 +460,36 @@ ${t.segments.map(s => `[${s.timestamp}] ${s.text}`).join('\n')}
                  });
 
                  const seconds = parseSecondsSafe(c.timestamp);
-                 let verifiedText = "Texto indisponível."; 
+                 let verifiedText = "Texto indisponível. (Verifique se o nome do ficheiro corresponde)"; 
 
                  if (transcriptMatch) {
-                    // Find closest segment (allow 20s variance)
+                    // Find closest segment
                     const closestSegment = transcriptMatch.segments.reduce((prev, curr) => {
                          const diffCurr = Math.abs(curr.seconds - seconds);
                          const diffPrev = Math.abs(prev.seconds - seconds);
-                         if (diffCurr < 20) return curr; 
                          return diffCurr < diffPrev ? curr : prev;
                     }, transcriptMatch.segments[0]);
 
                     if (closestSegment) {
-                        // FORCE 8 SENTENCES EXPANSION
-                        let expandedText = closestSegment.text || "";
-                        // Count sentences approximately by punctuation
-                        let sentenceCount = (expandedText.match(/[.!?]+/g) || []).length;
+                        // FORCE EXPANSION (8 SENTENCES, BUT CENTERED)
+                        // We try to take 1 segment BEFORE (for context context) and ~6 AFTER.
                         
                         const startIndex = transcriptMatch.segments.indexOf(closestSegment);
-                        let nextIdx = startIndex + 1;
+                        const contextStartIndex = Math.max(0, startIndex - 1); 
                         
-                        while (sentenceCount < 8 && nextIdx < transcriptMatch.segments.length) {
-                             const nextSeg = transcriptMatch.segments[nextIdx];
-                             if (nextSeg && nextSeg.text) {
-                                 expandedText += " " + nextSeg.text;
+                        let expandedText = "";
+                        let currentIdx = contextStartIndex;
+                        let sentenceCount = 0;
+                        
+                        // Strict limit: expand up to 8 sentences or end of stream
+                        while (sentenceCount < 8 && currentIdx < transcriptMatch.segments.length) {
+                             const seg = transcriptMatch.segments[currentIdx];
+                             if (seg && seg.text) {
+                                 // Add timestamp visually for clarity if it's the start
+                                 expandedText += (currentIdx === startIndex ? "" : "") + " " + seg.text;
                                  sentenceCount = (expandedText.match(/[.!?]+/g) || []).length;
                              }
-                             nextIdx++;
+                             currentIdx++;
                         }
                         
                         // CLEANING: Apply loop removal
@@ -493,7 +514,7 @@ ${t.segments.map(s => `[${s.timestamp}] ${s.text}`).join('\n')}
                 factId: factId,
                 factText: originalFact ? originalFact.text : "Desconhecido",
                 status: status,
-                summary: summaryMatch ? summaryMatch[1].trim() : "",
+                summary: summaryText,
                 citations: hydratedCitations
             });
         }
@@ -530,10 +551,9 @@ export const chatWithTranscripts = async (
    try {
     const formattedHistory = history.map(h => `${h.role === 'user' ? 'Utilizador' : 'Assistente'}: ${h.text}`).join('\n');
     
-    // Only send the last 10 messages to save context/tokens
-    const truncatedHistory = formattedHistory.split('\n').slice(-20).join('\n');
+    // Only send the last 15 messages
+    const truncatedHistory = formattedHistory.split('\n').slice(-15).join('\n');
 
-    // Create a summarized map of files for the AI
     const transcriptsContext = transcriptions.map(t => `
         <file name="${t.audioFileName}">
         ${t.fullText}
@@ -541,7 +561,7 @@ export const chatWithTranscripts = async (
     `).join('\n\n');
 
     const prompt = `
-        BASE DE DADOS DE ÁUDIO:
+        BASE DE DADOS DE ÁUDIO (Múltiplas Testemunhas):
         ${transcriptsContext}
 
         HISTÓRICO RECENTE:
@@ -550,17 +570,18 @@ export const chatWithTranscripts = async (
         PERGUNTA DO UTILIZADOR:
         ${currentMessage}
         
-        INSTRUÇÕES:
-        1. Responde com base no sentido e contexto dos áudios.
-        2. Se citares um áudio, usa APENAS a tag: [NomeDoFicheiro.mp3 @ MM:SS].
-        3. NÃO escrevas o texto do áudio depois da tag. A aplicação fará isso.
+        INSTRUÇÕES DE RIGOR:
+        1. **CONSULTA GLOBAL:** Tens de ler TODOS os ficheiros fornecidos acima. Não te limites ao primeiro. Se o utilizador perguntar "o que dizem os outros", procura ativamente nos outros ficheiros.
+        2. **SEM ALUCINAÇÕES:** Se não sabes, diz "Não encontrei informação sobre isso nos áudios". NÃO inventes texto repetitivo (ex: "de de de").
+        3. **RIGOR TEMÁTICO:** Responde APENAS ao que foi perguntado. Se perguntam sobre "pós-operatório", não fales do "pré-operatório".
+        4. **FORMATO:** Usa APENAS a tag: [NomeDoFicheiro.mp3 @ MM:SS] para citar.
     `;
 
     const response = await ai.models.generateContent({
         model: model,
         contents: { parts: [{ text: prompt }] },
         config: {
-          temperature: 0.4,
+          temperature: 0.1, // Lowered temperature to minimize hallucinations/loops
           safetySettings: [
             { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
             { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
@@ -570,7 +591,18 @@ export const chatWithTranscripts = async (
         }
     });
 
-    return response.text || "Sem resposta.";
+    let finalText = response.text || "Sem resposta.";
+    
+    // Post-process to remove potential infinite loops generated by the model
+    finalText = cleanRepetitiveLoops(finalText);
+    
+    // Safety check for massive repeated characters that regex might miss
+    if (finalText.length > 500 && /^(.{1,5})\1{10,}/.test(finalText.slice(-100))) {
+        finalText = "Erro: A IA gerou uma resposta repetitiva inválida. Por favor reformule a pergunta.";
+    }
+
+    return finalText;
+
    } catch (error) {
      console.error(error);
      return "Erro ao processar o chat.";

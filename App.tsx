@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, 
@@ -25,10 +26,12 @@ import {
   X,
   Eraser,
   Key,
-  ExternalLink
+  ExternalLink,
+  ClipboardPaste,
+  Link2
 } from 'lucide-react';
 import { AudioFile, Fact, ProjectState, SerializedProject, SerializedDatabase, ChatMessage, Citation, Transcription, AnalysisReport } from './types';
-import { transcribeAudio, analyzeFactsFromTranscripts, chatWithTranscripts } from './services/geminiService';
+import { transcribeAudio, analyzeFactsFromTranscripts, chatWithTranscripts, sanitizeTranscript } from './services/geminiService';
 import { exportToWord, saveProjectFile, saveDatabaseFile } from './utils/exportService';
 import AudioPlayer from './components/AudioPlayer';
 
@@ -71,6 +74,12 @@ const App: React.FC = () => {
   const [editingAnalysisId, setEditingAnalysisId] = useState<string | null>(null);
   const [tempAnalysisName, setTempAnalysisName] = useState("");
 
+  // Manual Import State
+  const [isManualImportOpen, setIsManualImportOpen] = useState(false);
+  const [manualImportName, setManualImportName] = useState("");
+  const [manualImportText, setManualImportText] = useState("");
+  const [manualImportLinkedId, setManualImportLinkedId] = useState<string>(""); // ID of existing audio to link
+
   // --- Auth Logic ---
   useEffect(() => {
     const savedKey = localStorage.getItem("veritas_api_key");
@@ -105,7 +114,8 @@ const App: React.FC = () => {
       const newFiles: AudioFile[] = fileList.map((f: File) => ({
         id: Math.random().toString(36).substr(2, 9),
         file: f,
-        name: f.name
+        name: f.name,
+        isVirtual: false
       }));
       setAudioFiles(prev => [...prev, ...newFiles]);
       
@@ -114,6 +124,69 @@ const App: React.FC = () => {
         setMissingFiles(prev => prev.filter(name => !newFiles.find(nf => nf.name === name)));
       }
     }
+  };
+
+  const handleManualImport = () => {
+      // Validation
+      if (!manualImportText.trim()) return alert("O texto da transcrição é obrigatório.");
+      
+      let targetFileId = manualImportLinkedId;
+      let targetFileName = manualImportName;
+
+      // Logic Branch: Linking to existing file vs Creating new virtual file
+      if (manualImportLinkedId) {
+          // Link to existing audio
+          const existingFile = audioFiles.find(f => f.id === manualImportLinkedId);
+          if (!existingFile) return alert("Ficheiro de áudio selecionado não encontrado.");
+          targetFileName = existingFile.name; // Force name match
+      } else {
+          // Create new Virtual File
+          if (!manualImportName.trim()) return alert("Defina um nome para a transcrição.");
+          targetFileId = Math.random().toString(36).substr(2, 9);
+          
+          const newFile: AudioFile = {
+              id: targetFileId,
+              file: null,
+              name: manualImportName.trim(),
+              isVirtual: true
+          };
+          setAudioFiles(prev => [...prev, newFile]);
+      }
+
+      // 2. Parse Text using the existing Sanitizer
+      const segments = sanitizeTranscript(manualImportText);
+      if (segments.length === 0) {
+          segments.push({
+              timestamp: "00:00",
+              seconds: 0,
+              text: manualImportText.trim()
+          });
+      }
+
+      const fullText = segments.map(s => `[${s.timestamp}] ${s.text}`).join('\n');
+      
+      const newTranscription: Transcription = {
+          audioFileId: targetFileId,
+          audioFileName: targetFileName,
+          fullText: fullText,
+          segments: segments,
+          processedAt: Date.now()
+      };
+
+      // Remove any existing transcription for this ID before adding new one
+      setProject(prev => ({
+          ...prev,
+          transcriptions: [
+              ...prev.transcriptions.filter(t => t.audioFileId !== targetFileId), 
+              newTranscription
+          ]
+      }));
+
+      // Reset Modal
+      setManualImportName("");
+      setManualImportText("");
+      setManualImportLinkedId("");
+      setIsManualImportOpen(false);
   };
 
   const removeAudioFile = (id: string) => {
@@ -147,11 +220,11 @@ const App: React.FC = () => {
     if (!apiKey) return alert("Erro: Chave de API em falta.");
 
     const unprocessedFiles = audioFiles.filter(f => 
-      !project.transcriptions.find(t => t.audioFileId === f.id || t.audioFileName === f.name)
+      !f.isVirtual && !project.transcriptions.find(t => t.audioFileId === f.id || t.audioFileName === f.name)
     );
     
     if (unprocessedFiles.length === 0) {
-      alert("Todos os ficheiros já foram processados.");
+      alert("Todos os ficheiros de áudio já foram processados.");
       return;
     }
 
@@ -174,7 +247,7 @@ const App: React.FC = () => {
 
   const runAnalysis = async () => {
     if (!apiKey) return alert("Erro: Chave de API em falta.");
-    if (project.transcriptions.length === 0) return alert("Processe os áudios primeiro para criar a base de dados.");
+    if (project.transcriptions.length === 0) return alert("Processe os áudios ou importe transcrições primeiro.");
     if (project.facts.length === 0) return alert("Adicione pelo menos um facto.");
     if (project.facts.some(f => !f.text.trim())) return alert("Preencha todos os factos.");
 
@@ -338,15 +411,21 @@ const App: React.FC = () => {
   const playCitation = (citation: Citation) => {
     setSeekTimestamp(null); // Reset trigger
     let file = audioFiles.find(f => f.id === citation.audioFileId);
+    
+    // Fallback: try to match by name if ID fails (common when loading older JSONs)
     if (!file) {
         file = audioFiles.find(f => f.name.toLowerCase() === citation.audioFileName.toLowerCase());
     }
     
     if (file) {
-      setActiveAudioFile(file);
-      setTimeout(() => {
-          setSeekTimestamp(citation.seconds);
-      }, 50);
+      if (file.isVirtual) {
+          alert(`Esta citação é de uma transcrição importada ("${file.name}"). Não existe áudio para reproduzir.`);
+      } else {
+          setActiveAudioFile(file);
+          setTimeout(() => {
+              setSeekTimestamp(citation.seconds);
+          }, 50);
+      }
     } else {
       alert(`Ficheiro de áudio "${citation.audioFileName}" não encontrado. Por favor carregue-o novamente.`);
     }
@@ -429,7 +508,7 @@ const App: React.FC = () => {
             const parts = timestamp.split(':');
             const seconds = parseInt(parts[0]) * 60 + parseInt(parts[1]);
 
-            // --- SOURCE OF TRUTH + 8 SENTENCES EXPANSION ---
+            // --- SOURCE OF TRUTH + 8 SENTENCES EXPANSION (Centered) ---
             const transcript = project.transcriptions.find(t => 
                 t.audioFileName.toLowerCase().replace(/\.(mp3|wav|m4a)$/, '').trim() === 
                 fileName.toLowerCase().replace(/\.(mp3|wav|m4a)$/, '').trim()
@@ -446,19 +525,20 @@ const App: React.FC = () => {
                 }, transcript.segments[0]);
 
                 if (closestSegment) {
-                    let expandedText = closestSegment.text || "";
-                    // Count sentences using basic punctuation check
-                    let sentenceCount = (expandedText.match(/[.!?]+/g) || []).length;
                     const startIndex = transcript.segments.indexOf(closestSegment);
-                    let nextIdx = startIndex + 1;
+                    const contextStartIndex = Math.max(0, startIndex - 1); // 1 before
                     
-                    while (sentenceCount < 8 && nextIdx < transcript.segments.length) {
-                         const nextSeg = transcript.segments[nextIdx];
-                         if (nextSeg && nextSeg.text) {
-                            expandedText += " " + nextSeg.text;
+                    let expandedText = "";
+                    let currentIdx = contextStartIndex;
+                    let sentenceCount = 0;
+                    
+                    while (sentenceCount < 8 && currentIdx < transcript.segments.length) {
+                         const seg = transcript.segments[currentIdx];
+                         if (seg && seg.text) {
+                            expandedText += " " + seg.text;
                             sentenceCount = (expandedText.match(/[.!?]+/g) || []).length;
                          }
-                         nextIdx++;
+                         currentIdx++;
                     }
                     
                     // CLEAN LOOPS ON DISPLAY
@@ -517,6 +597,98 @@ const App: React.FC = () => {
   };
 
   // --- Render Functions ---
+
+  const renderManualImportModal = () => {
+      if (!isManualImportOpen) return null;
+
+      // Filter real audio files (not virtual) that can be linked
+      const availableAudioFiles = audioFiles.filter(f => !f.isVirtual);
+
+      return (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 max-w-2xl w-full flex flex-col max-h-[90vh]">
+                  <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+                      <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                          <ClipboardPaste className="text-primary-500" /> Importar Transcrição Manual
+                      </h3>
+                      <button onClick={() => setIsManualImportOpen(false)} className="text-slate-500 hover:text-white">
+                          <X size={24} />
+                      </button>
+                  </div>
+
+                  <div className="space-y-4 flex-1 overflow-y-auto">
+                      <div className="bg-blue-900/20 border border-blue-900/50 p-4 rounded-lg text-sm text-blue-200">
+                          <p className="font-bold mb-1">Instruções:</p>
+                          <ul className="list-disc list-inside opacity-90 space-y-1">
+                              <li>Copie o texto do seu Word ou PDF e cole abaixo.</li>
+                              <li>O sistema procura carimbos de tempo no formato <strong>[MM:SS]</strong> (ex: [01:30], [12:45]).</li>
+                              <li>Pode associar este texto a um áudio já carregado para ativar a reprodução.</li>
+                          </ul>
+                      </div>
+                      
+                      {/* Linking Section */}
+                      <div className="space-y-2">
+                         <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2">
+                             <Link2 size={12} /> Associar a Áudio Existente (Opcional)
+                         </label>
+                         <select 
+                            value={manualImportLinkedId}
+                            onChange={(e) => setManualImportLinkedId(e.target.value)}
+                            className="w-full p-3 bg-slate-950 border border-slate-700 rounded-xl text-white outline-none focus:border-primary-500 appearance-none cursor-pointer"
+                         >
+                             <option value="">-- Criar nova entrada (Sem áudio) --</option>
+                             {availableAudioFiles.map(f => (
+                                 <option key={f.id} value={f.id}>{f.name}</option>
+                             ))}
+                         </select>
+                         <p className="text-[10px] text-slate-500">
+                             {manualImportLinkedId 
+                                ? "O texto colado será guardado como a transcrição oficial deste áudio." 
+                                : "Será criada uma entrada virtual apenas com texto (sem som)."}
+                         </p>
+                      </div>
+
+                      <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-400 uppercase">Nome da Testemunha / Ficheiro</label>
+                          <input 
+                              type="text" 
+                              value={manualImportLinkedId ? availableAudioFiles.find(f => f.id === manualImportLinkedId)?.name || "" : manualImportName}
+                              onChange={(e) => setManualImportName(e.target.value)}
+                              placeholder="Ex: Depoimento João Silva"
+                              disabled={!!manualImportLinkedId}
+                              className={`w-full p-3 bg-slate-950 border border-slate-700 rounded-xl text-white outline-none focus:border-primary-500 ${!!manualImportLinkedId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          />
+                      </div>
+
+                      <div className="space-y-2 flex-1 flex flex-col">
+                          <label className="text-xs font-bold text-slate-400 uppercase">Texto da Transcrição</label>
+                          <textarea 
+                              value={manualImportText}
+                              onChange={(e) => setManualImportText(e.target.value)}
+                              placeholder="Cole aqui o texto..."
+                              className="w-full flex-1 min-h-[250px] p-4 bg-slate-950 border border-slate-700 rounded-xl text-slate-300 font-mono text-sm leading-relaxed outline-none focus:border-primary-500 resize-none"
+                          />
+                      </div>
+                  </div>
+
+                  <div className="pt-6 border-t border-slate-800 mt-4 flex justify-end gap-3">
+                      <button 
+                          onClick={() => setIsManualImportOpen(false)}
+                          className="px-4 py-2 text-slate-400 hover:text-white font-medium"
+                      >
+                          Cancelar
+                      </button>
+                      <button 
+                          onClick={handleManualImport}
+                          className="px-6 py-2 bg-primary-600 hover:bg-primary-500 text-white font-bold rounded-lg shadow-lg transition-all"
+                      >
+                          {manualImportLinkedId ? "Associar e Guardar" : "Importar Texto"}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      );
+  };
 
   const renderApiKeyModal = () => (
       <div className="fixed inset-0 z-50 bg-slate-950 flex items-center justify-center p-4">
@@ -577,7 +749,7 @@ const App: React.FC = () => {
 
   const renderSetup = () => {
     const unprocCount = audioFiles.filter(f => 
-        !project.transcriptions.find(t => t.audioFileId === f.id || t.audioFileName === f.name)
+        !f.isVirtual && !project.transcriptions.find(t => t.audioFileId === f.id || t.audioFileName === f.name)
     ).length;
     const isProcessing = processingQueue.length > 0;
 
@@ -623,20 +795,32 @@ const App: React.FC = () => {
               </div>
             </div>
             
-            <div className="group relative border-2 border-dashed border-slate-700 bg-slate-900/50 rounded-2xl p-8 text-center hover:bg-slate-800 hover:border-primary-500/50 transition-all duration-300">
-              <input 
-                type="file" 
-                multiple 
-                accept="audio/*"
-                onChange={handleFileUpload}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-              />
-              <div className="flex flex-col items-center justify-center space-y-3">
-                 <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Upload className="text-primary-500" size={24} />
-                 </div>
-                 <p className="text-slate-300 font-medium">Clique ou arraste áudios aqui</p>
-              </div>
+            <div className="flex gap-2">
+                <div className="flex-1 group relative border-2 border-dashed border-slate-700 bg-slate-900/50 rounded-2xl p-8 text-center hover:bg-slate-800 hover:border-primary-500/50 transition-all duration-300">
+                  <input 
+                    type="file" 
+                    multiple 
+                    accept="audio/*"
+                    onChange={handleFileUpload}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  />
+                  <div className="flex flex-col items-center justify-center space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <Upload className="text-primary-500" size={24} />
+                    </div>
+                    <p className="text-slate-300 font-medium">Arrastar Áudios</p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => setIsManualImportOpen(true)}
+                  className="w-1/3 border-2 border-dashed border-slate-700 bg-slate-900/50 rounded-2xl p-4 text-center hover:bg-slate-800 hover:border-primary-500/50 transition-all duration-300 flex flex-col items-center justify-center gap-2 group"
+                >
+                    <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <ClipboardPaste className="text-slate-400 group-hover:text-primary-400" size={20} />
+                    </div>
+                    <p className="text-slate-400 text-xs font-medium group-hover:text-slate-200">Importar Texto</p>
+                </button>
             </div>
 
             <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
@@ -651,7 +835,10 @@ const App: React.FC = () => {
                         {isProcessingThis ? <Loader2 className="animate-spin" size={20} /> : isProcessed ? <CheckCircle2 size={20} /> : <FileAudio size={20} />}
                       </div>
                       <div className="flex flex-col overflow-hidden">
-                        <span className="text-sm font-medium text-slate-200 truncate">{file.name}</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-slate-200 truncate">{file.name}</span>
+                            {file.isVirtual && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 rounded border border-slate-700">TEXTO</span>}
+                        </div>
                         <span className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">
                           {isProcessed ? 'Processado' : 'Não Processado'}
                         </span>
@@ -840,7 +1027,7 @@ const App: React.FC = () => {
                         <div key={idx} className="flex gap-3 group items-start">
                             <button 
                             onClick={() => playCitation(cit)}
-                            className="mt-1 flex-shrink-0 w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-primary-400 hover:bg-primary-600 hover:text-white transition-all shadow-sm"
+                            className={`mt-1 flex-shrink-0 w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center transition-all shadow-sm ${cit.audioFileId === 'unknown' && cit.audioFileName.includes('Virtual') ? 'opacity-50 cursor-not-allowed' : 'text-primary-400 hover:bg-primary-600 hover:text-white'}`}
                             title="Reproduzir trecho"
                             >
                                 <PlayCircle size={14} fill="currentColor" className="opacity-80" />
@@ -1029,6 +1216,7 @@ const App: React.FC = () => {
         </div>
       </main>
       <AudioPlayer activeFile={activeAudioFile} seekTo={seekTimestamp} onClose={() => setActiveAudioFile(null)} />
+      {renderManualImportModal()}
     </div>
   );
 };

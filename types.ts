@@ -1,9 +1,11 @@
 
+
 export interface AudioFile {
   id: string;
-  file: File;
+  file: File | null; // Nullable for manually imported transcripts
   name: string;
   duration?: number;
+  isVirtual?: boolean; // New flag for text-only entries
 }
 
 export interface Fact {
