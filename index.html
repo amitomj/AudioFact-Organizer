@@ -1,6 +1,6 @@
 
 <!DOCTYPE html>
-<html lang="pt-PT">
+<html lang="pt-PT" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
+        darkMode: 'class',
         theme: {
           extend: {
             colors: {
@@ -32,21 +33,35 @@
       }
     </script>
     <style>
-      /* Custom scrollbar for better aesthetics in dark mode */
+      /* Custom scrollbar for better aesthetics */
       ::-webkit-scrollbar {
         width: 8px;
         height: 8px;
       }
-      ::-webkit-scrollbar-track {
+      /* Dark Mode Scrollbar */
+      .dark ::-webkit-scrollbar-track {
         background: #0f172a; 
       }
-      ::-webkit-scrollbar-thumb {
+      .dark ::-webkit-scrollbar-thumb {
         background: #334155; 
         border-radius: 4px;
       }
-      ::-webkit-scrollbar-thumb:hover {
+      .dark ::-webkit-scrollbar-thumb:hover {
         background: #475569; 
       }
+
+      /* Light Mode Scrollbar */
+      ::-webkit-scrollbar-track {
+        background: #f1f5f9; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8; 
+      }
+
       .scroll-smooth {
           scroll-behavior: smooth;
       }
@@ -58,12 +73,13 @@
     "react/": "https://aistudiocdn.com/react@^19.2.1/",
     "react": "https://aistudiocdn.com/react@^19.2.1",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0"
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+    "jszip": "https://aistudiocdn.com/jszip@^3.10.1"
   }
 }
 </script>
 </head>
-  <body class="bg-slate-950 text-slate-100 antialiased h-screen overflow-hidden">
+  <body class="bg-gray-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased h-screen overflow-hidden transition-colors duration-300">
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
   </body>

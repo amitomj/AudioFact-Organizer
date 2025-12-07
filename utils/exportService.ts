@@ -1,5 +1,6 @@
 
-import { AnalysisReport, SerializedProject, SerializedDatabase, ProjectState, EvidenceFile } from "../types";
+import { AnalysisReport, SerializedProject, SerializedDatabase, ProjectState, EvidenceFile, ChatMessage } from "../types";
+import JSZip from "jszip";
 
 /**
  * Generates an HTML-based .doc file which Word can open perfectly.
@@ -62,6 +63,104 @@ export const exportToWord = (report: AnalysisReport, projectTitle: string = "Rel
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+};
+
+/**
+ * Exports Chat History (Single or Full) to a ZIP containing a Word doc and referenced Attachments.
+ */
+export const exportChatToZip = async (
+    chatHistory: ChatMessage[], 
+    evidenceFiles: EvidenceFile[],
+    specificMessageId?: string
+) => {
+    const zip = new JSZip();
+    
+    // 1. Filter Messages
+    let messagesToExport = chatHistory;
+    if (specificMessageId) {
+        // Find the specific AI message
+        const targetIndex = chatHistory.findIndex(m => m.id === specificMessageId);
+        if (targetIndex !== -1) {
+            // Include the User Question immediately before it, if exists
+            const prevMsg = chatHistory[targetIndex - 1];
+            if (prevMsg && prevMsg.role === 'user') {
+                messagesToExport = [prevMsg, chatHistory[targetIndex]];
+            } else {
+                messagesToExport = [chatHistory[targetIndex]];
+            }
+        }
+    }
+
+    // 2. Identify referenced files
+    const referencedFileIds = new Set<string>();
+    messagesToExport.forEach(msg => {
+        // Regex to find [Filename @ Timestamp]
+        const matches = msg.text.match(/\[(.*?)\s*@/g);
+        if (matches) {
+            matches.forEach(m => {
+                const namePart = m.replace('[', '').replace('@', '').trim();
+                // Find file by fuzzy name match
+                const file = evidenceFiles.find(f => f.name.includes(namePart) || namePart.includes(f.name));
+                if (file) referencedFileIds.add(file.id);
+            });
+        }
+    });
+
+    // 3. Generate Word Content (HTML)
+    const wordContent = `
+        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head>
+            <meta charset="utf-8">
+            <title>Exportação Chat Veritas</title>
+            <style>
+                body { font-family: 'Calibri', sans-serif; }
+                .message { margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; }
+                .role-user { background-color: #e0f2fe; color: #000; }
+                .role-model { background-color: #f0fdf4; color: #000; }
+                .timestamp { font-size: 0.8em; color: #666; margin-bottom: 5px; }
+                .content { white-space: pre-wrap; }
+            </style>
+        </head>
+        <body>
+            <h1>Exportação de Conversa - Veritas AI</h1>
+            <p>Data: ${new Date().toLocaleString()}</p>
+            <hr/>
+            ${messagesToExport.map(msg => `
+                <div class="message role-${msg.role}">
+                    <div class="timestamp"><strong>${msg.role === 'user' ? 'UTILIZADOR' : 'ASSISTENTE'}</strong> - ${new Date(msg.timestamp).toLocaleString()}</div>
+                    <div class="content">${msg.text.replace(/\[\[DETECTED_PEOPLE:.*?\]\]/g, '')}</div>
+                </div>
+            `).join('')}
+        </body>
+        </html>
+    `;
+    
+    zip.file("Conversa.doc", '\ufeff' + wordContent);
+
+    // 4. Add Attachments
+    const attachmentsFolder = zip.folder("Anexos");
+    if (attachmentsFolder) {
+        referencedFileIds.forEach(id => {
+            const file = evidenceFiles.find(f => f.id === id);
+            if (file && file.file) {
+                // If it's a real file, add it
+                attachmentsFolder.file(file.name, file.file);
+            } else if (file && file.isVirtual) {
+                // Can't export virtual files content, maybe add a text note?
+                attachmentsFolder.file(`${file.name}.txt`, "Ficheiro original não disponível (Virtual).");
+            }
+        });
+    }
+
+    // 5. Generate and Download
+    const blob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Veritas_Export_${new Date().getTime()}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 };
 
 /**
