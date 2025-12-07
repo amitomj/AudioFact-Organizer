@@ -1,4 +1,5 @@
-import { AnalysisReport, SerializedProject, SerializedDatabase, ProjectState, AudioFile } from "../types";
+
+import { AnalysisReport, SerializedProject, SerializedDatabase, ProjectState, EvidenceFile } from "../types";
 
 /**
  * Generates an HTML-based .doc file which Word can open perfectly.
@@ -40,7 +41,7 @@ export const exportToWord = (report: AnalysisReport, projectTitle: string = "Rel
           ${r.citations.length > 0 ? '<h4>Citações Relevantes:</h4>' : ''}
           ${r.citations.map(c => `
             <div class="citation">
-              <span class="timestamp">[${c.audioFileName} @ ${c.timestamp}]</span>
+              <span class="timestamp">[${c.fileName} @ ${c.timestamp}]</span>
               "${c.text}"
             </div>
           `).join('')}
@@ -68,10 +69,10 @@ export const exportToWord = (report: AnalysisReport, projectTitle: string = "Rel
  */
 export const saveProjectFile = (state: ProjectState) => {
   const data: SerializedProject = {
-    type: 'project',
+    type: 'project_v2',
+    people: state.people,
     facts: state.facts,
-    analysis: state.analysis,
-    analysisHistory: state.analysisHistory, // Save history
+    savedReports: state.savedReports,
     chatHistory: state.chatHistory,
     createdAt: Date.now()
   };
@@ -87,13 +88,13 @@ export const saveProjectFile = (state: ProjectState) => {
 };
 
 /**
- * Saves ONLY the Database (Transcriptions).
+ * Saves ONLY the Database (Transcriptions/Processed Data).
  */
-export const saveDatabaseFile = (state: ProjectState, audioFiles: AudioFile[]) => {
+export const saveDatabaseFile = (state: ProjectState, files: EvidenceFile[]) => {
   const data: SerializedDatabase = {
-    type: 'database',
-    transcriptions: state.transcriptions,
-    audioFileNames: audioFiles.map(f => f.name), // To verify files upon reload
+    type: 'database_v2',
+    processedData: state.processedData,
+    fileManifest: files.map(f => ({ id: f.id, name: f.name, type: f.type, category: f.category, folder: f.folder })),
     exportedAt: Date.now()
   };
 
@@ -105,4 +106,32 @@ export const saveDatabaseFile = (state: ProjectState, audioFiles: AudioFile[]) =
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+};
+
+/**
+ * Loads a Project or Database from a JSON file.
+ */
+export const loadFromJSON = async (file: File): Promise<{ 
+    type: 'project' | 'database' | 'unknown', 
+    data: any 
+}> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const json = JSON.parse(e.target?.result as string);
+                if (json.type === 'project_v2') {
+                    resolve({ type: 'project', data: json as SerializedProject });
+                } else if (json.type === 'database_v2') {
+                    resolve({ type: 'database', data: json as SerializedDatabase });
+                } else {
+                    resolve({ type: 'unknown', data: null });
+                }
+            } catch (err) {
+                reject(new Error("Ficheiro inválido ou corrompido."));
+            }
+        };
+        reader.onerror = () => reject(new Error("Erro ao ler ficheiro."));
+        reader.readAsText(file);
+    });
 };

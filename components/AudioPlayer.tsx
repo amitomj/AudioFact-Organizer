@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AudioFile } from '../types';
+import { EvidenceFile } from '../types';
 import { Play, Pause, Volume2, X } from 'lucide-react';
 
 interface AudioPlayerProps {
-  activeFile: AudioFile | null;
+  activeFile: EvidenceFile | null;
   seekTo: number | null; // Seconds to seek to
   onClose: () => void;
 }
@@ -15,7 +15,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ activeFile, seekTo, onClose }
 
   // Handle new file loading
   useEffect(() => {
-    if (activeFile && audioRef.current) {
+    if (activeFile && activeFile.file && audioRef.current) {
       const url = URL.createObjectURL(activeFile.file);
       audioRef.current.src = url;
       

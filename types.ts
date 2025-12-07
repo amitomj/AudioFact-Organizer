@@ -1,11 +1,23 @@
 
+export type EvidenceType = 'AUDIO' | 'PDF' | 'IMAGE' | 'TEXT' | 'OTHER';
+export type EvidenceCategory = 'TESTIMONY' | 'INQUIRY' | 'OTHER';
 
-export interface AudioFile {
+export interface Person {
   id: string;
-  file: File | null; // Nullable for manually imported transcripts
   name: string;
-  duration?: number;
-  isVirtual?: boolean; // New flag for text-only entries
+  role?: string; // e.g., "Testemunha", "Autor", "Réu"
+}
+
+export interface EvidenceFile {
+  id: string;
+  file: File | null; // Nullable for manually imported text or restored sessions
+  name: string;
+  folder?: string; // Folder name for grouping
+  type: EvidenceType;
+  category: EvidenceCategory;
+  personId?: string; // Link to a person
+  size?: number;
+  isVirtual?: boolean;
 }
 
 export interface Fact {
@@ -21,10 +33,10 @@ export enum FactStatus {
 }
 
 export interface Citation {
-  audioFileId: string;
-  audioFileName: string;
-  timestamp: string; // Format "MM:SS"
-  seconds: number; // For seeking
+  fileId: string;
+  fileName: string;
+  timestamp: string; // Format "MM:SS" for audio, or "Pág X" for PDF if applicable
+  seconds: number; // For seeking (0 for non-time-based docs)
   text: string;
 }
 
@@ -37,8 +49,8 @@ export interface FactAnalysis {
 }
 
 export interface AnalysisReport {
-  id: string; // Unique ID for the report version
-  name: string; // User-friendly name
+  id: string; 
+  name: string;
   generatedAt: string;
   results: FactAnalysis[];
   generalConclusion: string;
@@ -51,41 +63,42 @@ export interface ChatMessage {
   timestamp: number;
 }
 
-export interface Transcription {
-  audioFileId: string;
-  audioFileName: string;
+export interface ProcessedContent {
+  fileId: string;
+  fileName: string;
   fullText: string;
+  // Segments are crucial for Audio Karaoke, but also useful for Page mapping in PDFs
   segments: {
-    timestamp: string;
-    seconds: number;
+    timestamp: string; // "MM:SS" or "Page 1"
+    seconds: number;   // Seconds for audio, Page Number for PDF (can use negative or specific logic)
     text: string;
   }[];
   processedAt: number;
 }
 
 export interface ProjectState {
+  people: Person[];
   facts: Fact[];
-  transcriptions: Transcription[];
-  analysis: AnalysisReport | null; // Currently viewed analysis
-  analysisHistory: AnalysisReport[]; // History of all analyses
+  processedData: ProcessedContent[]; 
+  savedReports: AnalysisReport[]; // Lista de relatórios guardados
   chatHistory: ChatMessage[];
   lastModified: number;
 }
 
-// 1. PROJECT FILE (Lightweight: Facts, Analysis, Chat)
+// SERIALIZATION TYPES
+
 export interface SerializedProject {
-  type: 'project';
+  type: 'project_v2';
+  people: Person[];
   facts: Fact[];
-  analysis: AnalysisReport | null;
-  analysisHistory: AnalysisReport[];
+  savedReports: AnalysisReport[];
   chatHistory: ChatMessage[];
   createdAt: number;
 }
 
-// 2. DATABASE FILE (Heavyweight: Transcriptions only)
 export interface SerializedDatabase {
-  type: 'database';
-  transcriptions: Transcription[];
-  audioFileNames: string[]; // To help map back to physical files
+  type: 'database_v2';
+  processedData: ProcessedContent[];
+  fileManifest: { id: string; name: string; type: EvidenceType; category: EvidenceCategory; folder?: string }[];
   exportedAt: number;
 }
