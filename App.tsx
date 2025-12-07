@@ -1,9 +1,10 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, FileText, MessageSquare, PlayCircle, Save, FolderOpen, Plus, Trash2,
   CheckCircle2, AlertCircle, Loader2, FileAudio, BrainCircuit, Database, 
   X, Key, Users, File, FileImage, LayoutGrid, Paperclip, Mic, Gavel, Edit2, Check,
-  ChevronDown, ChevronRight, StopCircle, Play, Layers, ArrowUp, ArrowDown, LogOut, ExternalLink, AlertTriangle, Sun, Moon, Pencil, ChevronUp, UserPlus, Download
+  ChevronDown, ChevronRight, StopCircle, Play, Layers, ArrowUp, ArrowDown, LogOut, ExternalLink, AlertTriangle, Sun, Moon, Pencil, ChevronUp, UserPlus, Download, ZapOff
 } from 'lucide-react';
 import { EvidenceFile, Fact, ProjectState, ChatMessage, ProcessedContent, Person, EvidenceType, Citation, EvidenceCategory, AnalysisReport, SerializedProject, SerializedDatabase } from './types';
 import { processFile, analyzeFactsFromEvidence, chatWithEvidence, sanitizeTranscript, parseSecondsSafe } from './services/geminiService';
@@ -152,6 +153,9 @@ const App: React.FC = () => {
   // Export Modal State
   const [exportModal, setExportModal] = useState<{ isOpen: boolean, messageId?: string }>({ isOpen: false });
 
+  // Quota Error Modal State
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+
   // --- EFFECT: THEME ---
   useEffect(() => {
     if (isDarkMode) {
@@ -168,6 +172,11 @@ const App: React.FC = () => {
   }, [selectedReportId]);
 
   // --- HELPERS ---
+
+  const isQuotaError = (error: any): boolean => {
+      const msg = error?.message?.toLowerCase() || "";
+      return msg.includes('429') || msg.includes('quota') || msg.includes('resource exhausted') || msg.includes('too many requests');
+  };
 
   const getFileType = (file: File): EvidenceType => {
       if (file.type.startsWith('audio/')) return 'AUDIO';
@@ -510,7 +519,13 @@ const App: React.FC = () => {
              }));
          } catch (e: any) {
              console.error(e);
-             alert(`Erro ao processar ${file.name}: ${e.message}`);
+             if (isQuotaError(e)) {
+                 setShowQuotaModal(true);
+                 stopProcessing();
+                 break; // Stop loop immediately
+             } else {
+                 alert(`Erro ao processar ${file.name}: ${e.message}`);
+             }
          } finally {
              setProcessingQueue(prev => prev.filter(id => id !== file.id));
          }
@@ -621,7 +636,13 @@ const App: React.FC = () => {
           setProject(prev => ({ ...prev, savedReports: [report, ...prev.savedReports] }));
           setSelectedReportId(report.id);
           setCurrentView('analysis');
-      } catch (e: any) { alert(e.message); } finally { setIsAnalyzing(false); }
+      } catch (e: any) { 
+          if (isQuotaError(e)) {
+              setShowQuotaModal(true);
+          } else {
+              alert(e.message); 
+          }
+      } finally { setIsAnalyzing(false); }
   };
 
   const deleteReport = (reportId: string) => {
@@ -669,7 +690,10 @@ const App: React.FC = () => {
           const resp = await chatWithEvidence(apiKey, project.processedData, [...project.chatHistory, msg], msg.text, peopleMap, evidenceFiles);
           const aiMsg: ChatMessage = { id: (Date.now()+1).toString(), role: 'model', text: resp, timestamp: Date.now() };
           setProject(prev => ({ ...prev, chatHistory: [...prev.chatHistory, aiMsg] }));
-      } catch(e) { alert("Erro no chat"); } finally { setIsChatting(false); }
+      } catch(e) { 
+          if (isQuotaError(e)) setShowQuotaModal(true);
+          else alert("Erro no chat"); 
+      } finally { setIsChatting(false); }
   };
   const clearChat = () => { if(confirm("Apagar histórico?")) setProject(prev => ({ ...prev, chatHistory: [] })); };
 
@@ -1433,6 +1457,33 @@ const App: React.FC = () => {
                         className="text-xs text-gray-400 dark:text-slate-500 hover:underline mt-4"
                     >
                         Cancelar
+                    </button>
+                </div>
+            </div>
+        )}
+
+        {/* QUOTA ERROR MODAL */}
+        {showQuotaModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+                <div className="bg-white dark:bg-slate-900 w-full max-w-md p-8 rounded-3xl shadow-2xl border border-red-100 dark:border-red-900/30 text-center relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-400 to-orange-400"></div>
+                    
+                    <div className="w-20 h-20 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-500 dark:text-red-400 ring-8 ring-red-50/50 dark:ring-red-900/10">
+                        <ZapOff size={32} />
+                    </div>
+
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">Pausa para Café ☕</h2>
+                    <p className="text-gray-600 dark:text-slate-300 mb-8 leading-relaxed text-sm">
+                        Atingiu o limite de velocidade da versão gratuita do Google Gemini (Quota Exceeded).
+                        <br/><br/>
+                        Por favor, <strong>aguarde cerca de 1 a 2 minutos</strong> antes de tentar novamente.
+                    </p>
+
+                    <button 
+                        onClick={() => setShowQuotaModal(false)}
+                        className="w-full py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-bold rounded-xl hover:scale-[1.02] transition-transform shadow-lg"
+                    >
+                        Entendido, vou aguardar
                     </button>
                 </div>
             </div>
