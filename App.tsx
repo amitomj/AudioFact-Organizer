@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, FileText, MessageSquare, PlayCircle, Save, FolderOpen, Plus, Trash2,
@@ -681,7 +680,7 @@ const App: React.FC = () => {
       const isProcessing = processingQueue.includes(file.id);
       
       return (
-         <div key={file.id} className={`bg-white dark:bg-slate-950 border p-2 rounded flex flex-col gap-2 group transition-all mb-1 ${file.isVirtual ? 'border-orange-200 dark:border-orange-900/50' : 'border-gray-200 dark:border-slate-800 hover:border-gray-400 dark:hover:border-slate-600'}`}>
+         <div key={file.id} className={`bg-white dark:bg-slate-900 border p-2 rounded flex flex-col gap-2 group transition-all mb-1 ${file.isVirtual ? 'border-orange-200 dark:border-orange-900/50' : 'border-gray-200 dark:border-slate-800 hover:border-gray-400 dark:hover:border-slate-600'}`}>
              <div className="flex items-center justify-between">
                  <div className="flex items-center gap-2 overflow-hidden">
                      <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 text-[10px] 
@@ -927,10 +926,53 @@ const App: React.FC = () => {
   if (!apiKey) {
       return (
           <div className="h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950 p-4 transition-colors duration-300">
-              <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-800 w-full max-w-md">
-                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2 text-center">Veritas V2.2</h1>
-                  <input type="password" value={tempApiKey} onChange={e => setTempApiKey(e.target.value)} placeholder="Google Gemini API Key" className="w-full p-3 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-xl text-gray-900 dark:text-white mb-4 focus:border-primary-500 outline-none"/>
-                  <button onClick={() => { setApiKey(tempApiKey); localStorage.setItem("veritas_api_key", tempApiKey); }} className="w-full py-3 bg-primary-600 hover:bg-primary-500 text-white font-bold rounded-xl transition-all">Entrar</button>
+              <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-800 w-full max-w-md animate-in fade-in zoom-in-95 duration-300">
+                  <div className="flex justify-center mb-6">
+                      <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-2xl flex items-center justify-center text-primary-600 dark:text-primary-400">
+                          <Key size={32} />
+                      </div>
+                  </div>
+                  
+                  <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2 text-center">Bem-vindo ao Veritas V2.2</h1>
+                  <p className="text-sm text-gray-500 dark:text-slate-400 text-center mb-6">
+                      Para utilizar a Inteligência Artificial, necessita de uma Chave API do Google Gemini.
+                  </p>
+
+                  <div className="space-y-4">
+                      <div>
+                          <label className="text-xs font-bold text-gray-500 dark:text-slate-500 uppercase ml-1 mb-1 block">Google Gemini API Key</label>
+                          <input 
+                            type="password" 
+                            value={tempApiKey} 
+                            onChange={e => setTempApiKey(e.target.value)} 
+                            placeholder="Cole a sua chave aqui (Ex: AIzaSy...)" 
+                            className="w-full p-3 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-xl text-gray-900 dark:text-white focus:border-primary-500 outline-none transition-all focus:ring-2 focus:ring-primary-500/20"
+                          />
+                      </div>
+
+                      <button 
+                        onClick={() => { 
+                            if(!tempApiKey.trim()) return alert("Por favor insira uma chave válida.");
+                            setApiKey(tempApiKey); 
+                            localStorage.setItem("veritas_api_key", tempApiKey); 
+                        }} 
+                        className="w-full py-3 bg-primary-600 hover:bg-primary-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-primary-900/20 active:scale-95"
+                      >
+                          Entrar na Aplicação
+                      </button>
+                  </div>
+
+                  <div className="mt-6 pt-6 border-t border-gray-100 dark:border-slate-800 text-center">
+                      <p className="text-xs text-gray-400 dark:text-slate-500 mb-2">Não tem uma chave API?</p>
+                      <a 
+                        href="https://aistudio.google.com/app/apikey" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-sm font-bold text-primary-600 dark:text-primary-400 hover:underline"
+                      >
+                          Criar chave no Google AI Studio <ExternalLink size={12} />
+                      </a>
+                  </div>
               </div>
           </div>
       );
