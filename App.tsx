@@ -4,7 +4,7 @@ import {
   Upload, FileText, MessageSquare, PlayCircle, Save, FolderOpen, Plus, Trash2,
   CheckCircle2, AlertCircle, Loader2, FileAudio, BrainCircuit, Database, 
   X, Key, Users, File, FileImage, LayoutGrid, Paperclip, Mic, Gavel, Edit2, Check,
-  ChevronDown, ChevronRight, StopCircle, Play, Layers, ArrowUp, ArrowDown, LogOut, ExternalLink, AlertTriangle, Sun, Moon, Pencil, ChevronUp, UserPlus, Download, ZapOff
+  ChevronDown, ChevronRight, StopCircle, Play, Layers, ArrowUp, ArrowDown, LogOut, ExternalLink, AlertTriangle, Sun, Moon, Pencil, ChevronUp, UserPlus, Download, ZapOff, Library, Headphones, Music
 } from 'lucide-react';
 import { EvidenceFile, Fact, ProjectState, ChatMessage, ProcessedContent, Person, EvidenceType, Citation, EvidenceCategory, AnalysisReport, SerializedProject, SerializedDatabase } from './types';
 import { processFile, analyzeFactsFromEvidence, chatWithEvidence, sanitizeTranscript, parseSecondsSafe } from './services/geminiService';
@@ -21,7 +21,7 @@ const initialProjectState: ProjectState = {
   lastModified: Date.now(),
 };
 
-type View = 'landing' | 'setup' | 'people' | 'analysis' | 'chat';
+type View = 'landing' | 'setup' | 'people' | 'analysis' | 'chat' | 'library';
 
 // GROUPED CITATION COMPONENT (Audio Bar Style)
 const CitationGroup: React.FC<{ 
@@ -155,6 +155,9 @@ const App: React.FC = () => {
 
   // Quota Error Modal State
   const [showQuotaModal, setShowQuotaModal] = useState(false);
+
+  // Library Search State
+  const [librarySearch, setLibrarySearch] = useState("");
 
   // --- EFFECT: THEME ---
   useEffect(() => {
@@ -1016,6 +1019,7 @@ const App: React.FC = () => {
                 {[
                     { id: 'setup', icon: LayoutGrid, label: 'Dados' },
                     { id: 'people', icon: Users, label: 'Pessoas' },
+                    { id: 'library', icon: Library, label: 'Biblioteca' },
                     { id: 'analysis', icon: FileText, label: 'Relatório' },
                     { id: 'chat', icon: MessageSquare, label: 'Chat' },
                 ].map(item => (
@@ -1085,6 +1089,7 @@ const App: React.FC = () => {
                     {currentView === 'people' && 'Gestão de Pessoas e Testemunhas'}
                     {currentView === 'analysis' && 'Relatórios de Análise Forense'}
                     {currentView === 'chat' && 'Assistente IA'}
+                    {currentView === 'library' && 'Biblioteca de Áudio e Evidências'}
                 </h1>
                 <div className="flex items-center gap-4">
                      {currentView === 'setup' && totalUnprocessed > 0 && (
@@ -1165,6 +1170,87 @@ const App: React.FC = () => {
                                 </button>
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {/* LIBRARY */}
+                {currentView === 'library' && (
+                    <div className="max-w-7xl mx-auto pb-20">
+                        <div className="flex items-center gap-4 mb-8">
+                            <div className="p-3 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800">
+                                <Headphones size={24} className="text-primary-600 dark:text-primary-400" />
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Biblioteca de Áudio</h2>
+                                <p className="text-sm text-gray-500 dark:text-slate-400">Explore e ouça os depoimentos processados com transcrição sincronizada.</p>
+                            </div>
+                            <div className="ml-auto relative w-64">
+                                <input 
+                                    className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl text-sm focus:border-primary-500 outline-none"
+                                    placeholder="Pesquisar ficheiro..."
+                                    value={librarySearch}
+                                    onChange={(e) => setLibrarySearch(e.target.value)}
+                                />
+                                <Music className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
+                            </div>
+                        </div>
+
+                        {evidenceFiles.filter(f => f.type === 'AUDIO').length === 0 ? (
+                             <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 dark:border-slate-800 rounded-2xl text-gray-400 dark:text-slate-600">
+                                 <Library size={48} className="mb-4 opacity-50"/>
+                                 <p className="font-bold">A Biblioteca está vazia</p>
+                                 <p className="text-sm mt-2">Carregue ficheiros de áudio no separador "Dados".</p>
+                             </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {evidenceFiles
+                                    .filter(f => f.type === 'AUDIO')
+                                    .filter(f => f.name.toLowerCase().includes(librarySearch.toLowerCase()))
+                                    .map(file => {
+                                        const isProcessed = project.processedData.some(pd => pd.fileId === file.id);
+                                        const personName = peopleMap[file.id] || "Desconhecido";
+                                        
+                                        return (
+                                            <div key={file.id} className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl p-6 flex flex-col hover:shadow-lg transition-all group">
+                                                <div className="flex items-start justify-between mb-4">
+                                                    <div className="w-12 h-12 bg-blue-50 dark:bg-primary-900/20 text-blue-600 dark:text-primary-400 rounded-xl flex items-center justify-center">
+                                                        <FileAudio size={24} />
+                                                    </div>
+                                                    {isProcessed && (
+                                                        <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-[10px] font-bold rounded uppercase">
+                                                            Processado
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                
+                                                <h3 className="font-bold text-gray-900 dark:text-white truncate mb-1" title={file.name}>{file.name}</h3>
+                                                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-slate-400 mb-6">
+                                                    <Users size={12} /> {personName}
+                                                </div>
+
+                                                <div className="mt-auto">
+                                                    {isProcessed ? (
+                                                        <button 
+                                                            onClick={() => setActiveEvidenceId(file.id)}
+                                                            className="w-full py-2.5 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-sm shadow-lg shadow-primary-900/20 hover:scale-[1.02] transition-all flex items-center justify-center gap-2"
+                                                        >
+                                                            <PlayCircle size={16} /> OUVIR / LER
+                                                        </button>
+                                                    ) : (
+                                                        <button 
+                                                            disabled
+                                                            className="w-full py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-400 dark:text-slate-600 rounded-xl font-bold text-sm cursor-not-allowed flex items-center justify-center gap-2"
+                                                        >
+                                                            <Loader2 size={16} /> Aguarda Processamento
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                }
+                            </div>
+                        )}
                     </div>
                 )}
 
