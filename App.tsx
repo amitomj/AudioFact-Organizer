@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, FileText, MessageSquare, PlayCircle, Save, FolderOpen, Plus, Trash2,
@@ -693,9 +692,13 @@ const App: React.FC = () => {
           const resp = await chatWithEvidence(apiKey, project.processedData, [...project.chatHistory, msg], msg.text, peopleMap, evidenceFiles);
           const aiMsg: ChatMessage = { id: (Date.now()+1).toString(), role: 'model', text: resp, timestamp: Date.now() };
           setProject(prev => ({ ...prev, chatHistory: [...prev.chatHistory, aiMsg] }));
-      } catch(e) { 
-          if (isQuotaError(e)) setShowQuotaModal(true);
-          else alert("Erro no chat"); 
+      } catch(e: any) { 
+          if (isQuotaError(e)) {
+              setShowQuotaModal(true);
+          } else {
+              console.error(e);
+              alert(`Erro no chat: ${e.message || "Erro desconhecido"}`); 
+          }
       } finally { setIsChatting(false); }
   };
   const clearChat = () => { if(confirm("Apagar histórico?")) setProject(prev => ({ ...prev, chatHistory: [] })); };
@@ -1503,88 +1506,72 @@ const App: React.FC = () => {
                 <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl w-full max-w-2xl border border-gray-200 dark:border-slate-800 shadow-2xl">
                     <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Importar Texto Manualmente</h3>
                     <input className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 p-3 rounded-lg text-gray-900 dark:text-white mb-4" placeholder="Nome do Documento / Depoimento" value={manualName} onChange={e => setManualName(e.target.value)} />
-                    <textarea className="w-full h-64 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 p-3 rounded-lg text-gray-800 dark:text-slate-300 mb-4 font-mono text-sm" placeholder="Cole o texto aqui..." value={manualText} onChange={e => setManualText(e.target.value)} />
-                    <div className="flex justify-end gap-2">
-                        <button onClick={() => setIsManualImportOpen(false)} className="px-4 py-2 text-gray-500 dark:text-slate-400">Cancelar</button>
-                        <button onClick={handleManualImport} className="px-4 py-2 bg-primary-600 text-white rounded-lg">Importar</button>
+                    <textarea 
+                        className="w-full h-64 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-lg p-3 text-sm text-gray-800 dark:text-slate-300 outline-none focus:border-primary-500 resize-none"
+                        placeholder="Cole o texto aqui..."
+                        value={manualText}
+                        onChange={e => setManualText(e.target.value)}
+                    />
+                    <div className="flex justify-end gap-2 mt-4">
+                        <button onClick={() => setIsManualImportOpen(false)} className="px-4 py-2 text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200 text-sm font-bold">Cancelar</button>
+                        <button onClick={handleManualImport} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-primary-900/20">Importar</button>
                     </div>
                 </div>
             </div>
         )}
 
-        {/* EXPORT MODAL */}
-        {exportModal.isOpen && (
-            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 animate-in fade-in">
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl w-full max-w-sm border border-gray-200 dark:border-slate-800 shadow-2xl text-center space-y-4">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">Exportar Conversa</h3>
-                    <p className="text-sm text-gray-500 dark:text-slate-400">
-                        O sistema irá gerar um ficheiro ZIP contendo um documento Word com a conversa e uma pasta com todos os ficheiros (Áudios/PDFs) mencionados.
-                    </p>
-                    
-                    <div className="grid grid-cols-1 gap-3 pt-2">
-                        {exportModal.messageId && (
-                             <button 
-                                onClick={() => handleExportChat('SINGLE')}
-                                className="px-4 py-3 bg-blue-50 hover:bg-blue-100 dark:bg-primary-900/20 dark:hover:bg-primary-900/30 text-blue-700 dark:text-blue-300 rounded-xl text-sm font-bold border border-blue-200 dark:border-primary-800 transition-colors"
-                             >
-                                Exportar Apenas Esta Resposta
-                             </button>
-                        )}
-                        <button 
-                             onClick={() => handleExportChat('FULL')}
-                             className="px-4 py-3 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 rounded-xl text-sm font-bold border border-gray-200 dark:border-slate-700 transition-colors"
-                        >
-                            Exportar Toda a Conversa
-                        </button>
-                    </div>
-
-                    <button 
-                        onClick={() => setExportModal({ isOpen: false })}
-                        className="text-xs text-gray-400 dark:text-slate-500 hover:underline mt-4"
-                    >
-                        Cancelar
-                    </button>
-                </div>
-            </div>
-        )}
-
-        {/* QUOTA ERROR MODAL */}
-        {showQuotaModal && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-                <div className="bg-white dark:bg-slate-900 w-full max-w-md p-8 rounded-3xl shadow-2xl border border-red-100 dark:border-red-900/30 text-center relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-400 to-orange-400"></div>
-                    
-                    <div className="w-20 h-20 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-500 dark:text-red-400 ring-8 ring-red-50/50 dark:ring-red-900/10">
-                        <ZapOff size={32} />
-                    </div>
-
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">Pausa para Café ☕</h2>
-                    <p className="text-gray-600 dark:text-slate-300 mb-8 leading-relaxed text-sm">
-                        Atingiu o limite de velocidade da versão gratuita do Google Gemini (Quota Exceeded).
-                        <br/><br/>
-                        Por favor, <strong>aguarde cerca de 1 a 2 minutos</strong> antes de tentar novamente.
-                    </p>
-
-                    <button 
-                        onClick={() => setShowQuotaModal(false)}
-                        className="w-full py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-bold rounded-xl hover:scale-[1.02] transition-transform shadow-lg"
-                    >
-                        Entendido, vou aguardar
-                    </button>
-                </div>
-            </div>
-        )}
-
-        {/* EVIDENCE VIEWER POPUP */}
+        {/* EVIDENCE VIEWER MODAL */}
         {activeEvidenceId && (
             <EvidenceViewer 
                 file={evidenceFiles.find(f => f.id === activeEvidenceId) || null}
                 processedData={project.processedData.find(pd => pd.fileId === activeEvidenceId)}
                 initialSeekSeconds={seekSeconds}
-                personName={peopleMap[activeEvidenceId] || "Desconhecido"}
+                personName={evidenceFiles.find(f => f.id === activeEvidenceId)?.personId ? project.people.find(p => p.id === evidenceFiles.find(f => f.id === activeEvidenceId)?.personId)?.name : undefined}
                 onClose={() => { setActiveEvidenceId(null); setSeekSeconds(null); }}
             />
         )}
+        
+        {/* EXPORT MODAL */}
+        {exportModal.isOpen && (
+            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl w-full max-w-md border border-gray-200 dark:border-slate-800 shadow-2xl">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Exportar Conversa</h3>
+                    <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">Escolha o formato de exportação.</p>
+                    <div className="flex flex-col gap-2">
+                        {exportModal.messageId && (
+                            <button onClick={() => handleExportChat('SINGLE')} className="p-3 bg-blue-50 dark:bg-primary-900/20 text-blue-700 dark:text-primary-300 rounded-lg text-sm font-bold hover:bg-blue-100 dark:hover:bg-primary-900/40 text-left transition-colors">
+                                Exportar Apenas Esta Resposta
+                            </button>
+                        )}
+                        <button onClick={() => handleExportChat('FULL')} className="p-3 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg text-sm font-bold hover:bg-gray-100 dark:hover:bg-slate-700 text-left transition-colors">
+                            Exportar Toda a Conversa
+                        </button>
+                    </div>
+                    <button onClick={() => setExportModal({ isOpen: false })} className="w-full mt-4 py-2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 text-sm font-bold">Cancelar</button>
+                </div>
+            </div>
+        )}
+
+        {/* QUOTA MODAL */}
+        {showQuotaModal && (
+            <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                 <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl max-w-sm text-center border border-red-200 dark:border-red-900/50 shadow-2xl">
+                     <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500 dark:text-red-400">
+                        <AlertTriangle size={32} />
+                     </div>
+                     <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Limite de Quota Atingido</h3>
+                     <p className="text-sm text-gray-600 dark:text-slate-300 mb-6 leading-relaxed">
+                         A API do Google Gemini atingiu o limite de pedidos gratuitos. 
+                         <br/><br/>
+                         Por favor, aguarde <strong>alguns instantes</strong> antes de tentar novamente.
+                     </p>
+                     <button onClick={() => setShowQuotaModal(false)} className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold shadow-lg shadow-red-900/20 transition-transform active:scale-95">
+                         Entendido
+                     </button>
+                 </div>
+            </div>
+        )}
+
     </div>
   );
 };

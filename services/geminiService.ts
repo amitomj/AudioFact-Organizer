@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { EvidenceFile, EvidenceType, Fact, FactAnalysis, FactStatus, AnalysisReport, ChatMessage, ProcessedContent, Citation } from "../types";
 
@@ -498,7 +497,8 @@ export const chatWithEvidence = async (
     });
 
     return cleanRepetitiveLoops(response.text || "Sem resposta.");
-   } catch (error) {
-     return "Erro ao processar chat.";
+   } catch (error: any) {
+     console.error("Chat API Error:", error);
+     throw error;
    }
 };
