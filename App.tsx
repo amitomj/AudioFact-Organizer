@@ -3,11 +3,12 @@ import {
   Upload, FileText, MessageSquare, PlayCircle, Save, FolderOpen, Plus, Trash2,
   CheckCircle2, AlertCircle, Loader2, FileAudio, BrainCircuit, Database, 
   X, Key, Users, File, FileImage, LayoutGrid, Paperclip, Mic, Gavel, Edit2, Check,
-  ChevronDown, ChevronRight, StopCircle, Play, Layers, ArrowUp, ArrowDown, LogOut, ExternalLink, AlertTriangle, Sun, Moon, Pencil, ChevronUp, UserPlus, Download, ZapOff, Library, Headphones, Music
+  ChevronDown, ChevronRight, StopCircle, Play, Layers, ArrowUp, ArrowDown, LogOut, ExternalLink, AlertTriangle, Sun, Moon, Pencil, ChevronUp, UserPlus, Download, ZapOff, Library, Headphones, Music, HelpCircle
 } from 'lucide-react';
 import { EvidenceFile, Fact, ProjectState, ChatMessage, ProcessedContent, Person, EvidenceType, Citation, EvidenceCategory, AnalysisReport, SerializedProject, SerializedDatabase } from './types';
 import { processFile, analyzeFactsFromEvidence, chatWithEvidence, sanitizeTranscript, parseSecondsSafe } from './services/geminiService';
 import { exportToWord, saveProjectFile, saveDatabaseFile, loadFromJSON, exportChatToZip } from './utils/exportService';
+import { generateDocumentation } from './utils/documentationGenerator';
 import EvidenceViewer from './components/EvidenceViewer';
 
 // --- INITIAL STATE ---
@@ -39,21 +40,10 @@ const CitationGroup: React.FC<{
     const allTimestamps: { label: string, seconds: number }[] = [];
     contentLines.forEach(line => {
         // Look for [00:00] or [00:00:00] or [File @ 00:00] patterns
-        const regex = /\[(?:.*?@\s*)?(\d{1,2}:\d{2}(?::\d{2})?)\]/g; 
+        const regex = /\[(?:.*?@\s*)?(\d{1,2}:\d{2}(?::\d{2})?)(?:\])?/g; 
         let match;
         while ((match = regex.exec(line)) !== null) {
             allTimestamps.push({ label: match[1], seconds: parseSecondsSafe(match[1]) });
-        }
-        // Also check if line itself is a citation list from AI like [File @ 01:00, 02:00]
-        const multiRegex = /\[.*?@\s*(.*?)\]/;
-        const multiMatch = line.match(multiRegex);
-        if (multiMatch) {
-            const times = multiMatch[1].split(',').map(t => t.trim());
-            times.forEach(t => {
-                if (t.match(/^\d{1,2}:\d{2}/)) {
-                     allTimestamps.push({ label: t, seconds: parseSecondsSafe(t) });
-                }
-            });
         }
     });
 
@@ -224,34 +214,24 @@ const App: React.FC = () => {
             {parts.map((part, i) => {
                 // Check if part is a citation tag
                 const matchNameTime = part.match(/^\[(.*?)\s*@\s*(.*?)\]$/); 
-                const matchTimeName = part.match(/^\[(\d{1,2}:\d{2}.*?)\s*,\s*(.*?)\]$/);
 
-                if (matchNameTime || matchTimeName) {
-                    const fileRef = matchNameTime ? matchNameTime[1] : matchTimeName![2];
-                    const timePart = matchNameTime ? matchNameTime[2] : matchTimeName![1];
+                if (matchNameTime) {
+                    const fileRef = matchNameTime[1];
+                    const timePart = matchNameTime[2];
                     
-                    // Split multiple times: "01:00, 02:00"
-                    const times = timePart.split(',').map(t => t.trim());
                     const file = evidenceFiles.find(f => f.name.toLowerCase().includes(fileRef.toLowerCase()) || fileRef.toLowerCase().includes(f.name.toLowerCase()));
                     
                     if (file && !file.isVirtual && file.type === 'AUDIO') {
-                        return (
-                            <span key={i} className="inline-flex flex-wrap items-center gap-1 align-middle mx-1">
-                                {times.map((t, idx) => {
-                                    const seconds = parseSecondsSafe(t);
-                                    if(Number.isNaN(seconds) || !t.match(/\d/)) return null; // Skip non-time
-                                    return (
-                                        <button 
-                                            key={idx}
-                                            onClick={(e) => { e.stopPropagation(); setActiveEvidenceId(file.id); setSeekSeconds(seconds); }}
-                                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-100 dark:bg-primary-900/40 text-blue-700 dark:text-primary-300 rounded text-[10px] font-mono hover:bg-blue-200 dark:hover:bg-primary-900/60 transition-colors border border-blue-200 dark:border-primary-800 shadow-sm cursor-pointer select-none"
-                                            title={`Ouvir ${file.name} em ${t}`}
-                                        >
-                                            <Play size={8} fill="currentColor"/> {t}
-                                        </button>
-                                    );
-                                })}
-                            </span>
+                         const seconds = parseSecondsSafe(timePart);
+                         return (
+                            <button 
+                                key={i}
+                                onClick={(e) => { e.stopPropagation(); setActiveEvidenceId(file.id); setSeekSeconds(seconds); }}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-100 dark:bg-primary-900/40 text-blue-700 dark:text-primary-300 rounded text-[10px] font-mono hover:bg-blue-200 dark:hover:bg-primary-900/60 transition-colors border border-blue-200 dark:border-primary-800 shadow-sm cursor-pointer select-none mx-1"
+                                title={`Ouvir ${file.name} em ${timePart}`}
+                            >
+                                <Play size={8} fill="currentColor"/> {timePart}
+                            </button>
                         );
                     }
                 }
@@ -482,7 +462,7 @@ const App: React.FC = () => {
   };
 
   // 3. Processing Logic with Stop
-  const runProcessing = async (scope: { type: 'ALL' | 'CATEGORY' | 'FOLDER', value?: string }) => {
+  const runProcessing = async (scope: { type: 'ALL' | 'CATEGORY' | 'FOLDER' | 'FILE', value?: string }) => {
      if (!apiKey) return alert("Chave API em falta.");
      
      // Filter Logic
@@ -494,11 +474,11 @@ const App: React.FC = () => {
          if (scope.type === 'ALL') return true;
          if (scope.type === 'CATEGORY') return f.category === scope.value;
          if (scope.type === 'FOLDER' && scope.value) {
-             // value format expected: "CATEGORY-FOLDERNAME"
              const [cat, ...rest] = scope.value.split('-');
              const folderName = rest.join('-');
              return f.category === cat && f.folder === folderName;
          }
+         if (scope.type === 'FILE') return f.id === scope.value;
          return false;
      });
 
@@ -536,6 +516,33 @@ const App: React.FC = () => {
 
   const stopProcessing = () => {
       abortProcessingRef.current = true;
+  };
+
+  // Speaker Renaming
+  const handleRenameSpeaker = (fileId: string, oldName: string, newName: string) => {
+      const processed = project.processedData.find(pd => pd.fileId === fileId);
+      if (!processed) return;
+      
+      const newSegments = processed.segments.map(seg => ({
+          ...seg,
+          // Robust Replacement: Finds oldName at start of line, handling both bold and plain formats
+          // Replaces with **NewName:**
+          text: seg.text.replace(
+              new RegExp(`(^|\\s)(\\*\\*)?${oldName}(\\*\\*)?(:)?`, 'g'), 
+              `$1**${newName}:**`
+          )
+      }));
+      
+      const newFullText = newSegments.map(s => `[${s.timestamp}] ${s.text}`).join('\n');
+      
+      setProject(prev => ({
+          ...prev,
+          processedData: prev.processedData.map(pd => 
+            pd.fileId === fileId 
+                ? { ...pd, segments: newSegments, fullText: newFullText }
+                : pd
+          )
+      }));
   };
 
   // People & Chat & Manual Import Logic (Same as before)
@@ -735,9 +742,21 @@ const App: React.FC = () => {
                          </div>
                      </div>
                  </div>
-                 <button onClick={() => setEvidenceFiles(prev => prev.filter(f => f.id !== file.id))} className="text-gray-400 dark:text-slate-600 hover:text-red-500">
-                     <Trash2 size={12} />
-                 </button>
+                 
+                 <div className="flex items-center gap-2">
+                     {!isProcessed && !isProcessing && !file.isVirtual && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); runProcessing({ type: 'FILE', value: file.id }); }}
+                            title="Processar apenas este ficheiro"
+                            className="p-1.5 bg-blue-50 dark:bg-primary-900/20 text-blue-600 dark:text-primary-400 rounded hover:bg-blue-100 dark:hover:bg-primary-900/40"
+                        >
+                            <Play size={10} fill="currentColor" />
+                        </button>
+                     )}
+                     <button onClick={() => setEvidenceFiles(prev => prev.filter(f => f.id !== file.id))} className="text-gray-400 dark:text-slate-600 hover:text-red-500">
+                         <Trash2 size={12} />
+                     </button>
+                 </div>
              </div>
              
              {file.category !== 'OTHER' && (
@@ -1040,6 +1059,12 @@ const App: React.FC = () => {
             <div className="mt-auto flex flex-col gap-2 w-full px-2 border-t border-gray-200 dark:border-slate-800 pt-4">
                  <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 text-gray-400 dark:text-slate-500 hover:text-primary-600 dark:hover:text-primary-400 flex flex-col items-center gap-1 w-full hover:bg-gray-100 dark:hover:bg-slate-800 rounded mb-2">
                     {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
+                </button>
+                
+                {/* MANUAL HELP BUTTON */}
+                 <button onClick={generateDocumentation} className="p-2 text-gray-400 dark:text-slate-500 hover:text-purple-600 dark:hover:text-purple-400 flex flex-col items-center gap-1 w-full hover:bg-gray-100 dark:hover:bg-slate-800 rounded mb-2">
+                    <HelpCircle size={16} />
+                    <span className="text-[8px]">Manual</span>
                 </button>
 
                 {/* PROJECT ACTIONS */}
@@ -1528,6 +1553,7 @@ const App: React.FC = () => {
                 initialSeekSeconds={seekSeconds}
                 personName={evidenceFiles.find(f => f.id === activeEvidenceId)?.personId ? project.people.find(p => p.id === evidenceFiles.find(f => f.id === activeEvidenceId)?.personId)?.name : undefined}
                 onClose={() => { setActiveEvidenceId(null); setSeekSeconds(null); }}
+                onRenameSpeaker={handleRenameSpeaker}
             />
         )}
         

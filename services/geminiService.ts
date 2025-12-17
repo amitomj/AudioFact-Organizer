@@ -41,23 +41,14 @@ export const sanitizeTranscript = (rawText: string): { timestamp: string; second
     const segments: { timestamp: string; seconds: number; text: string }[] = [];
     
     // STRICT FORMATTING: Ensure NEWLINE before every timestamp to force "one speech per line"
-    // Regex explanation:
-    // Finds any bracketed timestamp [MM:SS] or [HH:MM:SS] or [Pág X]
-    // If it's NOT preceded by a newline, insert one.
     let formattedText = rawText
-        // Replace "text [00:00]" or "text [00:00:00]" with "text\n[00:00]"
         .replace(/([^\n])\s*(\[\d{1,2}:\d{2}(?::\d{2})?\])/g, '$1\n$2')
-        // Replace "text 00:00:00" (no brackets) with "\n00:00:00" to catch messy AI output
         .replace(/([^\n])\s+(\d{1,2}:\d{2}:\d{2})/g, '$1\n$2')
-        // Replace "text [Pág 1]" with "text\n[Pág 1]"
         .replace(/([^\n])\s*(\[P[áa]g)/g, '$1\n$2')
-        // Also handle cases where there might be double brackets or other artifacts
-        .replace(/(\n\s*){2,}/g, '\n'); // Remove extra empty lines
+        .replace(/(\n\s*){2,}/g, '\n'); 
     
     const lines = formattedText.split('\n');
     
-    // Regex handles: "[00:00]", "[01:00:00]", "00:00", "**[00:00]**", "[Pág 1]", "Page 1:"
-    // Groups: 1=Hours(opt), 2=Minutes, 3=Seconds, 4=PageNum, 5=PageNumAlt, 6=Text
     const timestampRegex = /(?:^|[\s\*\-\.\(\[])(?:(?:(\d{1,2}):)?(\d{1,2}):(\d{2})|P[áa]g\.?\s*(\d+)|Page\s*(\d+))(?:\]|\)|:)?[\*\-\)]*\s+(.*)/i;
     
     let lastSeconds = -1;
@@ -96,7 +87,6 @@ export const sanitizeTranscript = (rawText: string): { timestamp: string; second
             // Hallucination check
             if (["subtitles by", "inaudível"].some(t => text.toLowerCase().includes(t))) continue;
             
-            // Basic cleanup
             text = cleanRepetitiveLoops(text);
 
             if (text === lastText) continue;
@@ -145,19 +135,22 @@ export const processFile = async (apiKey: string, evidenceFile: EvidenceFile): P
           És um Transcritor Forense Profissional.
           A TUA MISSÃO: Transcrever áudio judicial com rigor absoluto em Português de Portugal.
           
+          REGRAS DE DIARIZAÇÃO (IDENTIFICAÇÃO DE INTERLOCUTORES):
+          1. Tenta identificar quem fala pelo contexto (ex: "Senhor Juiz", "Senhora Testemunha").
+          2. Se souberes o nome/papel, usa: [MM:SS] **Juiz:** Texto...
+          3. Se não souberes, usa identificadores genéricos consistentes: [MM:SS] **Voz 1:** Texto... / [MM:SS] **Voz 2:** Texto...
+          
           REGRAS DE FORMATAÇÃO (RIGOROSAS):
           1. OBRIGATÓRIO: Coloca cada nova fala numa NOVA LINHA.
           2. OBRIGATÓRIO: Inicia cada fala com o carimbo de tempo [MM:SS] ou [HH:MM:SS].
-          3. NUNCA mistures falas diferentes na mesma linha.
-          4. Se houver silêncio ou música, ignora.
-          5. Transcreve exatamente o que é dito.
+          3. Formato da linha: [Tempo] **Interlocutor:** O que foi dito.
           
           EXEMPLO DO FORMATO DESEJADO:
-          [00:01] Bom dia a todos.
-          [00:03] Bom dia, senhor Juiz.
-          [01:15:20] Vamos iniciar a sessão.
+          [00:01] **Juiz:** Bom dia a todos.
+          [00:03] **Voz 1:** Bom dia, senhor Juiz.
+          [01:15:20] **Voz 2:** Não me recordo disso.
       `;
-      userPrompt = "Transcreve este áudio. Formato estrito: uma linha por carimbo [MM:SS] ou [HH:MM:SS].";
+      userPrompt = "Transcreve este áudio. Identifica os interlocutores (Voz 1, Voz 2...) e usa o formato [MM:SS] **Nome:** Texto.";
   } else {
       // PDF / IMAGE / TEXT
       systemInstruction = `
@@ -166,7 +159,6 @@ export const processFile = async (apiKey: string, evidenceFile: EvidenceFile): P
           FORMATO:
           - Se o documento tiver páginas, usa [Pág 1], [Pág 2] em linhas separadas no início de cada página.
           - Divide o texto por parágrafos lógicos.
-          - Mantém o rigor do texto original.
       `;
       userPrompt = "Extrai o texto integral. Usa [Pág X] para separar páginas.";
   }
@@ -194,9 +186,8 @@ export const processFile = async (apiKey: string, evidenceFile: EvidenceFile): P
         // Sanitize / Parse
         const segments = sanitizeTranscript(rawText);
 
-        // Fallback for non-timestamped docs (just huge text)
+        // Fallback for non-timestamped docs
         if (segments.length === 0 && rawText.trim().length > 0) {
-            // Split by paragraphs for readability
             const paragraphs = rawText.split(/\n\s*\n/);
             paragraphs.forEach((p, idx) => {
                 if (p.trim()) {
@@ -226,7 +217,6 @@ export const processFile = async (apiKey: string, evidenceFile: EvidenceFile): P
 };
 
 export const parseSecondsSafe = (timestamp: string): number => {
-    // Handles HH:MM:SS or MM:SS
     if (timestamp.includes(':')) {
         const parts = timestamp.split(':').map(Number);
         if (parts.length === 3) {
@@ -236,7 +226,6 @@ export const parseSecondsSafe = (timestamp: string): number => {
             return (parts[0] * 60) + parts[1];
         }
     }
-    // Handles "Pág X" -> returns X
     const num = timestamp.match(/\d+/);
     return num ? parseInt(num[0]) : 0;
 }
@@ -260,7 +249,6 @@ export const analyzeFactsFromEvidence = async (
 
   const factsList = facts.map((f, i) => `${i + 1}. [ID: ${f.id}] ${f.text}`).join('\n');
   
-  // Create Context with Person attribution AND CATEGORY
   const evidenceContext = processedData.map((t) => {
       const personName = peopleMap[t.fileId] || "Desconhecido";
       const fileData = fileMetadata.find(f => f.id === t.fileId);
@@ -273,102 +261,61 @@ ${t.fullText}
 `;
   }).join('\n');
 
-  // UPDATED SYSTEM PROMPT WITH STRICT TAGS FOR ROBUST PARSING
   const systemInstruction = `
     És um Juiz e Analista Forense.
-    
-    OBJETIVO: Verificar factos cruzando DEPOIMENTOS (Áudio/Transcrições), AUTOS DE INQUIRIÇÃO (PDF) e OUTRAS PROVAS.
-    
-    INSTRUÇÕES:
-    1. Usa as provas para confirmar ou desmentir cada facto.
-    2. Responde num formato estruturado com etiquetas (tags).
-    3. RIGOR DAS CITAÇÕES:
-       - Para ÁUDIOS (category="TESTIMONY"): Cita literalmente o que foi dito, entre aspas.
-       - Para DOCUMENTOS/AUTOS (category="INQUIRY" ou "OTHER"): NÃO copies frases soltas sem contexto. Faz um pequeno RESUMO contextual do que o documento diz sobre o facto.
-         Exemplo PDF: "O Auto confirma que o arguido foi visto no local X às Y horas, conforme registo da PSP."
-    4. AGRUPAMENTO POR FONTE: Se um facto é confirmado por um ficheiro, agrupa todas as evidências desse ficheiro.
-       - Se houver múltiplos momentos, usa o formato: [Ficheiro.mp3 @ 01:20, 05:30].
+    OBJETIVO: Verificar factos cruzando DEPOIMENTOS e DOCUMENTOS.
     
     FORMATO OBRIGATÓRIO PARA CADA FACTO:
     [[FACT]]
     ID: {id do facto}
     [[STATUS]] {Confirmado | Desmentido | Inconclusivo | Não Mencionado} [[END_STATUS]]
-    [[SUMMARY]]
-    Escreve aqui o resumo da análise baseada nas provas.
-    [[END_SUMMARY]]
+    [[SUMMARY]] Resumo da análise [[END_SUMMARY]]
     [[EVIDENCES]]
     - [NomeDoAudio.mp3 @ 00:00] "Texto citado"
-    - [NomeDoAudio.mp3 @ 05:30, 06:10] "Outro texto relevante"
-    - [Auto_Policia.pdf @ Pág 1] "Resumo do que consta na página"
     [[END_EVIDENCES]]
     [[END_FACT]]
     
     CONCLUSÃO GLOBAL:
-    [[CONCLUSION]]
-    Escreve a conclusão geral aqui.
-    [[END_CONCLUSION]]
+    [[CONCLUSION]] Conclusão geral [[END_CONCLUSION]]
   `;
 
-  const prompt = `
-    EVIDÊNCIAS DISPONÍVEIS:
-    ${evidenceContext}
-
-    FACTOS A VERIFICAR:
-    ${factsList}
-  `;
+  const prompt = `EVIDÊNCIAS:\n${evidenceContext}\n\nFACTOS:\n${factsList}`;
 
   try {
     const response = await ai.models.generateContent({
       model: model,
       contents: { parts: [{ text: prompt }] },
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: 0.1,
-      }
+      config: { systemInstruction: systemInstruction, temperature: 0.1 }
     });
 
     const rawText = response.text || "";
-    
     const results: FactAnalysis[] = [];
     let generalConclusion = "Análise concluída.";
     
-    // Robust Extraction using Tags
     const conclusionMatch = rawText.match(/\[\[CONCLUSION\]\]([\s\S]*?)\[\[END_CONCLUSION\]\]/);
     if (conclusionMatch) generalConclusion = conclusionMatch[1].trim();
 
     const factBlocks = rawText.split('[[FACT]]').slice(1);
     
     for (const block of factBlocks) {
-        // Extract ID
         const idMatch = block.match(/ID:\s*(.*?)(\n|\[)/);
         const factId = idMatch ? idMatch[1].trim() : "";
-        
-        // Extract Status
         const statusMatch = block.match(/\[\[STATUS\]\]([\s\S]*?)\[\[END_STATUS\]\]/);
         const status = statusMatch ? statusMatch[1].trim() as FactStatus : FactStatus.INCONCLUSIVE;
-
-        // Extract Summary
         const summaryMatch = block.match(/\[\[SUMMARY\]\]([\s\S]*?)\[\[END_SUMMARY\]\]/);
         const summaryText = summaryMatch ? summaryMatch[1].trim() : "Sem resumo disponível.";
-
-        // Extract Evidences Section
         const evidencesMatch = block.match(/\[\[EVIDENCES\]\]([\s\S]*?)\[\[END_EVIDENCES\]\]/);
         const evidencesContent = evidencesMatch ? evidencesMatch[1] : "";
 
-        // Parse Citations
         const citations: Citation[] = [];
-        // Regex to catch [File @ Time] format more flexibly, including multi-time
         const citationRegex = /\[\s*(.*?)\s*@\s*(.*?)\s*\]/g;
         let match;
         
         while ((match = citationRegex.exec(evidencesContent)) !== null) {
             const fileNameRef = match[1].trim();
             const timestampGroup = match[2].trim();
-            
-            // Handle multiple timestamps in one block: "01:20, 05:30"
             const timestamps = timestampGroup.split(',').map(t => t.trim());
 
-            // Fuzzy Match File Name (Case Insensitive)
             const source = processedData.find(d => 
                 d.fileName.toLowerCase().includes(fileNameRef.toLowerCase()) || 
                 fileNameRef.toLowerCase().includes(d.fileName.toLowerCase())
@@ -378,19 +325,16 @@ ${t.fullText}
             const isDocument = fileMeta?.category !== 'TESTIMONY';
 
             if (source) {
-                // Add a citation for each timestamp found
                 timestamps.forEach(ts => {
                     const seconds = parseSecondsSafe(ts);
                     let text = "Texto indisponível";
                     
                     if (isDocument) {
-                         // Fallback logic for docs
                          const seg = source.segments.reduce((prev, curr) => {
                              return Math.abs(curr.seconds - seconds) < Math.abs(prev.seconds - seconds) ? curr : prev;
                         }, source.segments[0]);
                         text = seg ? seg.text : text;
                     } else {
-                        // Audio: Keep strict context
                         const centerIdx = source.segments.findIndex(s => Math.abs(s.seconds - seconds) < 2);
                         if (centerIdx !== -1) {
                             const start = Math.max(0, centerIdx - 1);
@@ -462,7 +406,7 @@ export const chatWithEvidence = async (
     }).join('\n\n');
 
     const prompt = `
-        BASE DE DADOS (Áudios, Autos, Documentos):
+        BASE DE DADOS:
         ${evidenceContext}
 
         HISTÓRICO:
@@ -471,23 +415,24 @@ export const chatWithEvidence = async (
         PERGUNTA:
         ${currentMessage}
         
-        INSTRUÇÕES:
+        INSTRUÇÕES DE CITAÇÃO (CRÍTICO):
+        Quando a resposta depender de um ficheiro de áudio, tens de usar uma referência clicável.
+        Mesmo que identifiques o orador (ex: "Voz 1"), tens de incluir o botão de tempo a seguir.
+        
+        FORMATO OBRIGATÓRIO DOS BOTÕES:
+        [NomeDoFicheiro.mp3 @ MM:SS]
+        
+        EXEMPLOS CORRETOS:
+        - "A Voz 1 afirmou que não estava lá [Depoimento.mp3 @ 01:23]."
+        - "O arguido negou tudo [Interrogatorio.wav @ 05:40]."
+        
+        INSTRUÇÕES GERAIS:
         1. Consulta TUDO antes de responder.
-        2. Distingue entre o que foi dito em depoimento (category="TESTIMONY") e o que está nos autos (category="INQUIRY").
-        3. AGRUPAMENTO POR FONTE: Se encontrares várias evidências no mesmo ficheiro, agrupa-as.
-        4. CITAÇÕES MÚLTIPLAS: Se um ficheiro tem vários momentos relevantes, lista-os no formato: [Ficheiro.mp3 @ 01:00, 02:30, 05:15].
-        5. Dá respostas completas e explicativas.
+        2. Distingue entre depoimento (category="TESTIMONY") e autos (category="INQUIRY").
+        3. Se houver nomes como "Voz 1" ou "Voz 2", usa-os na resposta.
         
-        INSTRUÇÃO ESPECIAL - DETEÇÃO DE PESSOAS:
-        Se a pergunta envolver identificar pessoas (testemunhas, arguidos, etc.), NO FINAL DA RESPOSTA, gera uma etiqueta oculta com a lista.
-        
-        IMPORTANTE: Tenta associar cada pessoa ao seu ficheiro de origem (onde é inquirida ou onde presta depoimento), baseando-te na identificação feita no início do texto.
-        
-        FORMATO OBRIGATÓRIO PARA DETEÇÃO:
-        [[DETECTED_PEOPLE: Nome da Pessoa | Nome do Ficheiro, Outra Pessoa | Outro Ficheiro, Pessoa Sem Ficheiro]]
-        
-        Exemplo: [[DETECTED_PEOPLE: João Silva | depoimento_joao.mp3, Maria Santos | Auto_01.pdf]]
-        Nota: Usa o caracter '|' para separar o nome da pessoa do nome do ficheiro.
+        DETEÇÃO DE PESSOAS:
+        [[DETECTED_PEOPLE: Nome | Ficheiro, ...]]
     `;
 
     const response = await ai.models.generateContent({

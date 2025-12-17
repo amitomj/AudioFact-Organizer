@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { EvidenceFile, ProcessedContent } from '../types';
-import { Play, Pause, X, Rewind, FastForward, FileText, User, ExternalLink, Search, ChevronUp, ChevronDown } from 'lucide-react';
+import { Play, Pause, X, Rewind, FastForward, FileText, User, ExternalLink, Search, ChevronUp, ChevronDown, Edit3, Save } from 'lucide-react';
 
 interface EvidenceViewerProps {
   file: EvidenceFile | null;
@@ -9,6 +9,7 @@ interface EvidenceViewerProps {
   initialSeekSeconds: number | null;
   personName?: string;
   onClose: () => void;
+  onRenameSpeaker: (fileId: string, oldName: string, newName: string) => void;
 }
 
 const EvidenceViewer: React.FC<EvidenceViewerProps> = ({ 
@@ -16,7 +17,8 @@ const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
   processedData, 
   initialSeekSeconds, 
   personName,
-  onClose 
+  onClose,
+  onRenameSpeaker
 }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -32,6 +34,12 @@ const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
   const [searchResults, setSearchResults] = useState<number[]>([]);
   const [currentResultIndex, setCurrentResultIndex] = useState(0);
 
+  // Speaker Renaming State
+  const [showSpeakerTools, setShowSpeakerTools] = useState(false);
+  const [detectedSpeakers, setDetectedSpeakers] = useState<string[]>([]);
+  const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
+  const [newSpeakerName, setNewSpeakerName] = useState("");
+
   useEffect(() => {
     if (file && file.file) {
       const url = URL.createObjectURL(file.file);
@@ -42,6 +50,42 @@ const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
     }
     setFileUrl(null);
   }, [file]);
+
+  // Detect Speakers on Load
+  useEffect(() => {
+      if (processedData) {
+          const speakers = new Set<string>();
+          processedData.segments.forEach(seg => {
+              let name = "";
+              
+              // Pattern 1: Bold Format (**Speaker**)
+              const boldMatch = seg.text.match(/^\*\*(.*?)\*\*/);
+              if (boldMatch) {
+                  name = boldMatch[1].replace(':', '').trim();
+              } 
+              // Pattern 2: Legacy/Simple Format (Speaker:) - Must be at start of string
+              else {
+                  const simpleMatch = seg.text.match(/^([A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+):/);
+                  if (simpleMatch) {
+                      name = simpleMatch[1].trim();
+                  }
+              }
+
+              // Validate name to avoid false positives (e.g., too long sentences)
+              if (name && name.length > 0 && name.length < 40 && !name.includes('\n')) {
+                  speakers.add(name);
+              }
+          });
+          
+          const speakerList = Array.from(speakers).sort();
+          setDetectedSpeakers(speakerList);
+          
+          // Auto-open tools if speakers are detected
+          if (speakerList.length > 0) {
+              setShowSpeakerTools(true);
+          }
+      }
+  }, [processedData]);
 
   // Search Logic
   useEffect(() => {
@@ -173,6 +217,17 @@ const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
             : part
       );
   };
+  
+  const submitRename = (oldName: string) => {
+      if(file && newSpeakerName.trim() && newSpeakerName !== oldName) {
+          onRenameSpeaker(file.id, oldName, newSpeakerName.trim());
+          setEditingSpeaker(null);
+          setNewSpeakerName("");
+          
+          // Update local state immediately for better UX
+          setDetectedSpeakers(prev => prev.map(s => s === oldName ? newSpeakerName.trim() : s));
+      }
+  };
 
   if (!file) return null;
 
@@ -300,6 +355,59 @@ const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
                          </div>
                      </div>
                  )}
+                 
+                 {/* Detected Speakers Panel Toggle */}
+                 <div className="mt-6 w-full bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col">
+                     <button 
+                        onClick={() => setShowSpeakerTools(!showSpeakerTools)}
+                        className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800 bg-gray-50 dark:bg-slate-900"
+                     >
+                         <span>Interlocutores Detectados ({detectedSpeakers.length})</span>
+                         {showSpeakerTools ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                     </button>
+                     
+                     {showSpeakerTools && (
+                         <div className="p-3 bg-white dark:bg-slate-950 max-h-48 overflow-y-auto space-y-2 border-t border-gray-100 dark:border-slate-800">
+                             {detectedSpeakers.length === 0 ? (
+                                 <div className="text-center text-[10px] text-gray-400 dark:text-slate-600 py-2">
+                                     Nenhum interlocutor detectado automaticamente.
+                                 </div>
+                             ) : (
+                                 detectedSpeakers.map(speaker => (
+                                     <div key={speaker} className="flex items-center justify-between bg-gray-50 dark:bg-slate-900 p-2 rounded border border-gray-100 dark:border-slate-800">
+                                         {editingSpeaker === speaker ? (
+                                             <div className="flex items-center gap-2 flex-1 animate-in fade-in">
+                                                 <input 
+                                                    className="flex-1 text-xs p-1.5 bg-white dark:bg-slate-800 border border-blue-300 dark:border-primary-600 rounded text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-blue-500"
+                                                    value={newSpeakerName}
+                                                    onChange={e => setNewSpeakerName(e.target.value)}
+                                                    placeholder="Novo nome..."
+                                                    autoFocus
+                                                    onKeyDown={(e) => {
+                                                        if(e.key === 'Enter') submitRename(speaker);
+                                                        if(e.key === 'Escape') setEditingSpeaker(null);
+                                                    }}
+                                                 />
+                                                 <button onClick={() => submitRename(speaker)} className="p-1.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded hover:bg-green-200 dark:hover:bg-green-900/50" title="Guardar"><Save size={14}/></button>
+                                                 <button onClick={() => setEditingSpeaker(null)} className="p-1.5 bg-gray-200 dark:bg-slate-800 text-gray-600 dark:text-slate-400 rounded hover:bg-gray-300 dark:hover:bg-slate-700" title="Cancelar"><X size={14}/></button>
+                                             </div>
+                                         ) : (
+                                             <>
+                                                <div className="flex items-center gap-2 overflow-hidden">
+                                                    <div className="w-6 h-6 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-[10px] text-orange-600 dark:text-orange-400 font-bold shrink-0">
+                                                        {speaker.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <span className="text-xs text-gray-700 dark:text-slate-300 font-bold truncate" title={speaker}>{speaker}</span>
+                                                </div>
+                                                <button onClick={() => { setEditingSpeaker(speaker); setNewSpeakerName(speaker); }} className="text-gray-400 hover:text-blue-600 dark:hover:text-primary-400 p-1 transition-colors" title="Renomear Interlocutor"><Edit3 size={14} /></button>
+                                             </>
+                                         )}
+                                     </div>
+                                 ))
+                             )}
+                         </div>
+                     )}
+                 </div>
              </div>
 
              {/* Right Panel: Transcript / Text */}
