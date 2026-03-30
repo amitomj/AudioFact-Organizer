@@ -1,5 +1,5 @@
 
-import { AnalysisReport, SerializedProject, SerializedDatabase, ProjectState, EvidenceFile, ChatMessage } from "../types";
+import { AnalysisReport, SerializedProject, SerializedDatabase, ProjectState, EvidenceFile, ChatMessage, ProcessedContent } from "../types";
 import JSZip from "jszip";
 
 /**
@@ -13,7 +13,7 @@ export const exportToWord = (report: AnalysisReport, projectTitle: string = "Rel
       <title>${projectTitle}</title>
       <style>
         body { font-family: 'Calibri', 'Arial', sans-serif; line-height: 1.5; }
-        h1 { color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
+        h1 { mso-style-name: "Título 1"; color: #1e293b; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
         h2 { color: #334155; margin-top: 20px; background-color: #f1f5f9; padding: 5px; }
         h3 { color: #475569; font-size: 14pt; }
         .status { font-weight: bold; }
@@ -60,6 +60,71 @@ export const exportToWord = (report: AnalysisReport, projectTitle: string = "Rel
   const link = document.createElement('a');
   link.href = url;
   link.download = `${projectTitle.replace(/\s+/g, '_')}_Analise.doc`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+/**
+ * Exports one or multiple transcripts to a Word document.
+ * Multiple transcripts will be separated by page breaks and use H1 for titles.
+ */
+export const exportTranscriptsToWord = (transcripts: ProcessedContent[], fileName: string = "Transcrições_Veritas") => {
+  if (transcripts.length === 0) return;
+
+  const content = `
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head>
+      <meta charset="utf-8">
+      <title>${fileName}</title>
+      <style>
+        @page Section1 { size: 595.3pt 841.9pt; margin: 70.85pt 70.85pt 70.85pt 70.85pt; mso-header-margin: 35.4pt; mso-footer-margin: 35.4pt; mso-paper-source: 0; }
+        div.Section1 { page: Section1; }
+        body { font-family: 'Calibri', 'Arial', sans-serif; line-height: 1.5; color: #000; }
+        h1 { 
+            mso-style-name: "Título 1";
+            font-size: 24pt; 
+            color: #2563eb; 
+            border-bottom: 2px solid #2563eb; 
+            padding-bottom: 8pt; 
+            margin-top: 24pt;
+            margin-bottom: 12pt;
+        }
+        .segment { margin-bottom: 10pt; page-break-inside: avoid; }
+        .timestamp { font-family: 'Consolas', 'Courier New', monospace; font-size: 9pt; color: #64748b; font-weight: bold; margin-right: 8pt; }
+        .text { font-size: 11pt; }
+        .page-break { page-break-after: always; }
+        .meta-info { font-size: 9pt; color: #94a3b8; margin-bottom: 20pt; font-style: italic; }
+      </style>
+    </head>
+    <body>
+      <div class="Section1">
+        ${transcripts.map((t, idx) => `
+          <div class="${idx < transcripts.length - 1 ? 'page-break' : ''}">
+            <h1>${t.fileName}</h1>
+            <div class="meta-info">Transcrição processada em: ${new Date(t.processedAt).toLocaleString('pt-PT')}</div>
+            
+            ${t.segments.map(s => `
+              <div class="segment">
+                <span class="timestamp">[${s.timestamp}]</span>
+                <span class="text">${s.text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')}</span>
+              </div>
+            `).join('')}
+          </div>
+        `).join('')}
+      </div>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob(['\ufeff', content], {
+    type: 'application/msword'
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${fileName.replace(/\s+/g, '_')}.doc`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
