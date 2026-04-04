@@ -9,7 +9,7 @@ import {
 import { EvidenceFile, Fact, ProjectState, ChatMessage, ProcessedContent, Person, EvidenceType, Citation, EvidenceCategory, AnalysisReport, SerializedProject, SerializedDatabase, FactStatus } from './types';
 import { processFile, analyzeFactsFromEvidence, chatWithEvidence, sanitizeTranscript, parseSecondsSafe } from './services/geminiService';
 import { exportToWord, saveProjectFile, saveDatabaseFile, loadFromJSON, exportChatToZip, exportTranscriptsToWord } from './utils/exportService';
-import { generateDocumentation } from './utils/documentationGenerator';
+import { generateDocumentation, getDocumentationHTML } from './utils/documentationGenerator';
 import EvidenceViewer from './components/EvidenceViewer';
 
 // --- INITIAL STATE ---
@@ -111,6 +111,7 @@ const App: React.FC = () => {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [dragOverCategory, setDragOverCategory] = useState<EvidenceCategory | null>(null);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [isChatting, setIsChatting] = useState(false);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -481,7 +482,7 @@ const App: React.FC = () => {
             <div className="w-10 h-px bg-gray-200 dark:bg-slate-800 my-6"></div>
             <div className="flex flex-col gap-5 w-full items-center">
                 <button onClick={() => setIsDarkMode(!isDarkMode)} className="flex flex-col items-center gap-1 text-gray-400 hover:text-primary-600 transition-colors">{isDarkMode ? <Sun size={18}/> : <Moon size={18}/>}</button>
-                <button onClick={generateDocumentation} className="flex flex-col items-center gap-1 text-gray-400 hover:text-purple-600 transition-colors"><HelpCircle size={18}/><span className="text-[8px] font-bold uppercase">Manual</span></button>
+                <button onClick={() => setShowManual(true)} className="flex flex-col items-center gap-1 text-gray-400 hover:text-purple-600 transition-colors"><HelpCircle size={18}/><span className="text-[8px] font-bold uppercase">Manual</span></button>
                 <div className="flex flex-col items-center gap-2">
                   <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest mb-1">Projeto</span>
                   <button onClick={() => projectInputRef.current?.click()} className="flex flex-col items-center gap-1 text-gray-400 hover:text-blue-600 transition-colors"><ArrowUp size={18}/><span className="text-[8px] font-bold uppercase">Carregar</span></button>
@@ -775,6 +776,28 @@ const App: React.FC = () => {
                      <p className="text-sm text-gray-500 dark:text-slate-400 mb-6 leading-relaxed">Aguarde <strong>1 minuto</strong> antes de continuar o processamento.</p>
                      <button onClick={() => setShowQuotaModal(false)} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg uppercase tracking-wider">Entendido</button>
                  </div>
+            </div>
+        )}
+
+        {showManual && (
+            <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 md:p-12">
+                <div className="bg-white dark:bg-slate-900 w-full max-w-5xl h-full rounded-3xl border border-gray-200 dark:border-slate-800 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
+                    <div className="h-16 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between px-8 shrink-0 bg-gray-50/50 dark:bg-slate-900/50">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center text-purple-600 dark:text-purple-400"><HelpCircle size={18}/></div>
+                            <h3 className="font-bold text-gray-900 dark:text-white uppercase tracking-tight">Manual de Utilizador Veritas</h3>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <button onClick={generateDocumentation} className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-lg transition-all">
+                                <Download size={14}/> Descarregar (.doc)
+                            </button>
+                            <button onClick={() => setShowManual(false)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><X size={24}/></button>
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-white dark:bg-slate-950">
+                        <div dangerouslySetInnerHTML={{ __html: getDocumentationHTML() }} />
+                    </div>
+                </div>
             </div>
         )}
     </div>
