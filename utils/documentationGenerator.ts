@@ -1,21 +1,24 @@
 
-export const getDocumentationHTML = () => {
-  return `
-    <div class="manual-container">
+export const generateDocumentation = () => {
+  const content = `
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head>
+      <meta charset="utf-8">
+      <title>Manual Veritas V2</title>
       <style>
-        .manual-container { font-family: 'Inter', sans-serif; line-height: 1.6; color: #1a202c; max-width: 900px; margin: auto; padding: 20px; }
-        .manual-container h1 { color: #1e3a8a; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; margin-top: 40px; font-size: 28pt; }
-        .manual-container h2 { color: #1d4ed8; margin-top: 30px; background-color: #eff6ff; padding: 10px; border-left: 5px solid #3b82f6; font-size: 18pt; }
-        .manual-container h3 { color: #475569; margin-top: 20px; font-size: 14pt; font-weight: bold; border-bottom: 1px solid #e2e8f0; }
-        .manual-container p { margin-bottom: 15px; text-align: justify; }
-        .manual-container ul { margin-bottom: 15px; }
-        .manual-container li { margin-bottom: 5px; }
-        .manual-container code { background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-family: 'Consolas', monospace; color: #c026d3; }
-        .manual-container pre { background-color: #1e293b; color: #f8fafc; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: 'Consolas', monospace; }
-        .manual-container .toc { background-color: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 40px; }
-        .manual-container .toc a { text-decoration: none; color: #2563eb; display: block; margin-bottom: 5px; font-weight: 500; }
-        .manual-container .toc a:hover { text-decoration: underline; }
-        .manual-container .image-placeholder { 
+        body { font-family: 'Calibri', 'Arial', sans-serif; line-height: 1.6; color: #1a202c; max-width: 800px; margin: auto; }
+        h1 { color: #1e3a8a; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; margin-top: 40px; font-size: 28pt; }
+        h2 { color: #1d4ed8; margin-top: 30px; background-color: #eff6ff; padding: 10px; border-left: 5px solid #3b82f6; font-size: 18pt; }
+        h3 { color: #475569; margin-top: 20px; font-size: 14pt; font-weight: bold; border-bottom: 1px solid #e2e8f0; }
+        p { margin-bottom: 15px; text-align: justify; }
+        ul { margin-bottom: 15px; }
+        li { margin-bottom: 5px; }
+        code { background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-family: 'Consolas', monospace; color: #c026d3; }
+        pre { background-color: #1e293b; color: #f8fafc; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: 'Consolas', monospace; }
+        .toc { background-color: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 40px; }
+        .toc a { text-decoration: none; color: #2563eb; display: block; margin-bottom: 5px; font-weight: 500; }
+        .toc a:hover { text-decoration: underline; }
+        .image-placeholder { 
             background-color: #e2e8f0; 
             border: 2px dashed #94a3b8; 
             color: #64748b; 
@@ -25,21 +28,12 @@ export const getDocumentationHTML = () => {
             border-radius: 8px;
             font-weight: bold;
         }
-        .manual-container .note { background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 10px; margin: 10px 0; font-size: 0.9em; }
-        .manual-container .tech-tag { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin-right: 5px; }
-        .manual-container .back-link { font-size: 0.8em; color: #94a3b8; text-decoration: none; display: block; margin-top: 10px; text-align: right; }
-        
-        /* Dark mode adjustments */
-        .dark .manual-container { color: #e2e8f0; }
-        .dark .manual-container h1 { color: #60a5fa; border-bottom-color: #2563eb; }
-        .dark .manual-container h2 { color: #93c5fd; background-color: #1e3a8a33; border-left-color: #2563eb; }
-        .dark .manual-container h3 { color: #cbd5e1; border-bottom-color: #334155; }
-        .dark .manual-container .toc { background-color: #0f172a; border-color: #1e293b; }
-        .dark .manual-container .toc a { color: #60a5fa; }
-        .dark .manual-container .image-placeholder { background-color: #1e293b; border-color: #334155; color: #94a3b8; }
-        .dark .manual-container .note { background-color: #451a0333; border-left-color: #b45309; color: #fbbf24; }
-        .dark .manual-container .tech-tag { background: #1e1b4b; color: #c7d2fe; }
+        .note { background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 10px; margin: 10px 0; font-size: 0.9em; }
+        .tech-tag { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; rounded: 4px; font-size: 0.8em; font-weight: bold; margin-right: 5px; }
+        .back-link { font-size: 0.8em; color: #94a3b8; text-decoration: none; display: block; margin-top: 10px; text-align: right; }
       </style>
+    </head>
+    <body>
       
       <h1>Veritas Audio Analyst V2</h1>
       <p><strong>Manual de Desenvolvimento, Utilização e Referência Técnica</strong></p>
@@ -71,6 +65,7 @@ export const getDocumentationHTML = () => {
       <h2 id="intro">1. Introdução e Visão Geral</h2>
       <p>O <strong>Veritas Audio Analyst V2</strong> é uma ferramenta web avançada desenhada para advogados, juízes e analistas forenses. O seu objetivo principal é transformar horas de gravações de áudio e centenas de páginas de autos em informação estruturada, pesquisável e acionável.</p>
       <p>Diferente de transcriptores comuns, o Veritas utiliza a tecnologia <strong>Google Gemini Pro 1.5/Flash</strong> para "ouvir" e "ler" provas, permitindo o cruzamento de dados (fact checking), a identificação automática de intervenientes e a navegação precisa no áudio através de uma interface estilo "Karaoke".</p>
+      <a href="#top" class="back-link">Voltar ao Topo</a>
 
       <!-- SECÇÃO 2 -->
       <h2 id="development">2. O Caminho do Desenvolvimento</h2>
@@ -87,6 +82,7 @@ export const getDocumentationHTML = () => {
       <h3>2.3 Interface Visual: "A Barra de Áudio"</h3>
       <p>No chat, respostas com muitas citações tornavam-se ilegíveis. O utilizador queria ver claramente de que ficheiro vinha a informação e ter acesso rápido aos vários momentos em que o assunto foi falado.</p>
       <p><strong>Solução (CitationGroup):</strong> Desenvolveu-se um componente visual que agrupa todas as citações do mesmo ficheiro num cartão azul. O rodapé desse cartão contém uma linha de botões interativos (ex: <code>02:50</code>, <code>05:10</code>), transformando a leitura numa experiência de navegação multimédia.</p>
+      <a href="#top" class="back-link">Voltar ao Topo</a>
 
       <!-- SECÇÃO 3 -->
       <h2 id="user-manual">3. Manual do Utilizador</h2>
@@ -140,6 +136,7 @@ export const getDocumentationHTML = () => {
         <li><strong>Pesquisa:</strong> Use a barra no topo para encontrar palavras. Use as setas para saltar entre resultados.</li>
         <li><strong>Abrir Original:</strong> Clique no botão no canto superior direito para abrir o ficheiro original numa nova aba.</li>
       </ul>
+      <a href="#top" class="back-link">Voltar ao Topo</a>
 
       <!-- SECÇÃO 4 -->
       <h2 id="technical">4. Documentação Técnica</h2>
@@ -183,46 +180,6 @@ export const getDocumentationHTML = () => {
 
       <hr />
       <p style="text-align: center; font-size: 0.8em; color: #999;">Documentação gerada automaticamente pelo Veritas Audio Analyst V2.</p>
-    </div>
-  `;
-};
-
-export const generateDocumentation = () => {
-  const content = `
-    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-    <head>
-      <meta charset="utf-8">
-      <title>Manual Veritas V2</title>
-      <style>
-        body { font-family: 'Calibri', 'Arial', sans-serif; line-height: 1.6; color: #1a202c; max-width: 800px; margin: auto; }
-        h1 { color: #1e3a8a; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; margin-top: 40px; font-size: 28pt; }
-        h2 { color: #1d4ed8; margin-top: 30px; background-color: #eff6ff; padding: 10px; border-left: 5px solid #3b82f6; font-size: 18pt; }
-        h3 { color: #475569; margin-top: 20px; font-size: 14pt; font-weight: bold; border-bottom: 1px solid #e2e8f0; }
-        p { margin-bottom: 15px; text-align: justify; }
-        ul { margin-bottom: 15px; }
-        li { margin-bottom: 5px; }
-        code { background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-family: 'Consolas', monospace; color: #c026d3; }
-        pre { background-color: #1e293b; color: #f8fafc; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: 'Consolas', monospace; }
-        .toc { background-color: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 40px; }
-        .toc a { text-decoration: none; color: #2563eb; display: block; margin-bottom: 5px; font-weight: 500; }
-        .toc a:hover { text-decoration: underline; }
-        .image-placeholder { 
-            background-color: #e2e8f0; 
-            border: 2px dashed #94a3b8; 
-            color: #64748b; 
-            padding: 40px; 
-            text-align: center; 
-            margin: 20px 0; 
-            border-radius: 8px;
-            font-weight: bold;
-        }
-        .note { background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 10px; margin: 10px 0; font-size: 0.9em; }
-        .tech-tag { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin-right: 5px; }
-        .back-link { font-size: 0.8em; color: #94a3b8; text-decoration: none; display: block; margin-top: 10px; text-align: right; }
-      </style>
-    </head>
-    <body>
-      ${getDocumentationHTML()}
     </body>
     </html>
   `;

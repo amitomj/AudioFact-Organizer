@@ -273,6 +273,38 @@ export const saveDatabaseFile = (state: ProjectState, files: EvidenceFile[]) => 
 };
 
 /**
+ * Exports the processed folder structure (split PDFs) as a ZIP file.
+ */
+export const exportParsedStructureToZip = async (
+    evidenceFiles: EvidenceFile[],
+    onProgress?: (percent: number) => void
+) => {
+    const zip = new JSZip();
+    
+    evidenceFiles.forEach(file => {
+        if (file.file) {
+            const folderPath = file.folder || "Raiz";
+            const folder = zip.folder(folderPath);
+            if (folder) {
+                folder.file(file.name, file.file);
+            }
+        }
+    });
+
+    const blob = await zip.generateAsync({ type: "blob" }, (metadata) => {
+        if (onProgress) onProgress(metadata.percent);
+    });
+    
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Veritas_Estrutura_Processada_${new Date().getTime()}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
+/**
  * Loads a Project or Database from a JSON file.
  */
 export const loadFromJSON = async (file: File): Promise<{ 
