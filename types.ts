@@ -1,6 +1,6 @@
 
 export type EvidenceType = 'AUDIO' | 'PDF' | 'IMAGE' | 'TEXT' | 'OTHER';
-export type EvidenceCategory = 'TESTIMONY' | 'INDICTMENT' | 'OTHER';
+export type EvidenceCategory = 'TESTIMONY' | 'INQUIRY' | 'OTHER';
 
 export interface Person {
   id: string;
@@ -18,16 +18,11 @@ export interface EvidenceFile {
   personId?: string; // Link to a person
   size?: number;
   isVirtual?: boolean;
-  originalDocId?: string; // ID of the original PDF if this is a split page
-  pageNumber?: number;    // Page number if this is a split page
-  totalPages?: number;    // Total pages in the original document
 }
 
 export interface Fact {
   id: string;
   text: string;
-  group?: string; // For grouping articles in indictments
-  isIndictment?: boolean; // To distinguish from manual facts
 }
 
 export enum FactStatus {
@@ -106,13 +101,4 @@ export interface SerializedDatabase {
   processedData: ProcessedContent[];
   fileManifest: { id: string; name: string; type: EvidenceType; category: EvidenceCategory; folder?: string }[];
   exportedAt: number;
-}
-
-declare global {
-  interface Window {
-    aistudio?: {
-      hasSelectedApiKey: () => Promise<boolean>;
-      openSelectKey: () => Promise<void>;
-    };
-  }
 }

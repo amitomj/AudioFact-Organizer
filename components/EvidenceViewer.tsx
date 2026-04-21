@@ -5,24 +5,20 @@ import { Play, Pause, X, Rewind, FastForward, FileText, User, ExternalLink, Sear
 
 interface EvidenceViewerProps {
   file: EvidenceFile | null;
-  allFiles: EvidenceFile[];
   processedData: ProcessedContent | undefined;
   initialSeekSeconds: number | null;
   personName?: string;
   onClose: () => void;
   onRenameSpeaker: (fileId: string, oldName: string, newName: string) => void;
-  onSwitchFile: (fileId: string) => void;
 }
 
 const EvidenceViewer: React.FC<EvidenceViewerProps> = ({ 
   file, 
-  allFiles,
   processedData, 
   initialSeekSeconds, 
   personName,
   onClose,
-  onRenameSpeaker,
-  onSwitchFile
+  onRenameSpeaker
 }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -180,18 +176,6 @@ const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
     }
   };
 
-  const handlePrevPage = () => {
-      if (!file || !file.originalDocId || file.pageNumber === undefined) return;
-      const prevPage = allFiles.find(f => f.originalDocId === file.originalDocId && f.pageNumber === file.pageNumber! - 1);
-      if (prevPage) onSwitchFile(prevPage.id);
-  };
-
-  const handleNextPage = () => {
-      if (!file || !file.originalDocId || file.pageNumber === undefined) return;
-      const nextPage = allFiles.find(f => f.originalDocId === file.originalDocId && f.pageNumber === file.pageNumber! + 1);
-      if (nextPage) onSwitchFile(nextPage.id);
-  };
-
   const skip = (amount: number) => {
       if (audioRef.current) audioRef.current.currentTime += amount;
   };
@@ -237,42 +221,15 @@ const EvidenceViewer: React.FC<EvidenceViewerProps> = ({
                  </div>
                  <div>
                      <h2 className="text-lg font-bold text-gray-900 dark:text-white truncate max-w-md">{file.name}</h2>
-                     <div className="flex items-center gap-3">
-                         {personName && (
-                             <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-slate-400">
-                                 <User size={12} /> {personName}
-                             </div>
-                         )}
-                         {file.pageNumber && file.totalPages && (
-                             <div className="flex items-center gap-1.5 text-xs font-bold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 px-2 py-0.5 rounded">
-                                 Página {file.pageNumber} de {file.totalPages}
-                             </div>
-                         )}
-                     </div>
+                     {personName && (
+                         <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-slate-400">
+                             <User size={12} /> {personName}
+                         </div>
+                     )}
                  </div>
              </div>
              
              <div className="flex items-center gap-2">
-                 {file.originalDocId && (
-                     <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-lg mr-2">
-                         <button 
-                             onClick={handlePrevPage} 
-                             disabled={file.pageNumber === 1}
-                             className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded text-gray-500 dark:text-slate-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                             title="Página Anterior"
-                         >
-                             <ChevronUp size={18} />
-                         </button>
-                         <button 
-                             onClick={handleNextPage} 
-                             disabled={file.pageNumber === file.totalPages}
-                             className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded text-gray-500 dark:text-slate-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                             title="Próxima Página"
-                         >
-                             <ChevronDown size={18} />
-                         </button>
-                     </div>
-                 )}
                  {fileUrl && (
                      <a href={fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white transition-colors border border-transparent hover:border-gray-200 dark:hover:border-slate-700">
                          <ExternalLink size={18} />

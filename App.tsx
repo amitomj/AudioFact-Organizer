@@ -7,10 +7,9 @@ import {
   ChevronDown, ChevronRight, StopCircle, Play, Layers, ArrowUp, ArrowDown, LogOut, ExternalLink, AlertTriangle, Sun, Moon, Pencil, ChevronUp, UserPlus, Download, ZapOff, Library, Headphones, Music, HelpCircle, User, Filter, Search as SearchIcon, BookOpen
 } from 'lucide-react';
 import { EvidenceFile, Fact, ProjectState, ChatMessage, ProcessedContent, Person, EvidenceType, Citation, EvidenceCategory, AnalysisReport, SerializedProject, SerializedDatabase, FactStatus } from './types';
-import { processFile, analyzeFactsFromEvidence, chatWithEvidence, sanitizeTranscript, parseSecondsSafe, extractArticlesFromIndictment, analyzeIndictmentMapping } from './services/geminiService';
-import { exportToWord, saveProjectFile, saveDatabaseFile, loadFromJSON, exportChatToZip, exportTranscriptsToWord, exportParsedStructureToZip } from './utils/exportService';
-import { generateDocumentation } from './utils/documentationGenerator';
-import { splitPdf } from './utils/pdfUtils';
+import { processFile, analyzeFactsFromEvidence, chatWithEvidence, sanitizeTranscript, parseSecondsSafe } from './services/geminiService';
+import { exportToWord, saveProjectFile, saveDatabaseFile, loadFromJSON, exportChatToZip, exportTranscriptsToWord } from './utils/exportService';
+import { generateDocumentation, getDocumentationHTML } from './utils/documentationGenerator';
 import EvidenceViewer from './components/EvidenceViewer';
 
 // --- INITIAL STATE ---
@@ -97,16 +96,11 @@ const CitationGroup: React.FC<{
 };
 
 const App: React.FC = () => {
-  const [hasApiKey, setHasApiKey] = useState<boolean>(false);
-  const [isCheckingKey, setIsCheckingKey] = useState<boolean>(true);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [currentView, setCurrentView] = useState<View>('landing');
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([]); 
   const [project, setProject] = useState<ProjectState>(initialProjectState);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
-  const [isExtractingArticles, setIsExtractingArticles] = useState(false);
   const [processingQueue, setProcessingQueue] = useState<string[]>([]);
   const abortProcessingRef = useRef<boolean>(false);
   const [activeEvidenceId, setActiveEvidenceId] = useState<string | null>(null);
@@ -117,48 +111,15 @@ const App: React.FC = () => {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [dragOverCategory, setDragOverCategory] = useState<EvidenceCategory | null>(null);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
-  const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [showManual, setShowManual] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [isChatting, setIsChatting] = useState(false);
-  const [isSplitting, setIsSplitting] = useState<string | null>(null);
-  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<Set<string>>(new Set());
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [librarySearch, setLibrarySearch] = useState("");
 
   const projectInputRef = useRef<HTMLInputElement>(null);
   const databaseInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const checkKey = async () => {
-      try {
-        if (window.aistudio) {
-          const hasKey = await window.aistudio.hasSelectedApiKey();
-          setHasApiKey(hasKey);
-        } else {
-          // Em ambiente local sem aistudio, assumimos que a chave está no .env
-          setHasApiKey(true);
-        }
-      } catch (e) {
-        console.error("Erro ao verificar chave API:", e);
-        setHasApiKey(true); // Fallback
-      } finally {
-        setIsCheckingKey(false);
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleSelectKey = async () => {
-    try {
-      if (window.aistudio) {
-        await window.aistudio.openSelectKey();
-        setHasApiKey(true);
-      }
-    } catch (e) {
-      console.error("Erro ao abrir seleção de chave:", e);
-    }
-  };
 
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
@@ -177,15 +138,10 @@ const App: React.FC = () => {
   };
 
   const getFileType = (file: File): EvidenceType => {
-      const name = file.name.toLowerCase();
-      const type = file.type.toLowerCase();
-      
-      if (type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)$/.test(name)) return 'AUDIO';
-      if (type === 'application/pdf' || name.endsWith('.pdf')) return 'PDF';
-      if (type.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/.test(name)) return 'IMAGE';
-      if (type.startsWith('text/') || name.endsWith('.txt')) return 'TEXT';
-      if (type.includes('word') || type.includes('officedocument') || /\.(docx|doc|rtf)$/.test(name)) return 'TEXT';
-      
+      if (file.type.startsWith('audio/')) return 'AUDIO';
+      if (file.type === 'application/pdf') return 'PDF';
+      if (file.type.startsWith('image/')) return 'IMAGE';
+      if (file.type.startsWith('text/')) return 'TEXT';
       return 'OTHER';
   };
 
@@ -283,72 +239,32 @@ const App: React.FC = () => {
       return renderedElements;
   };
 
-  const addFiles = async (fileList: FileList | File[], category: EvidenceCategory) => {
+  const addFiles = (fileList: FileList | File[], category: EvidenceCategory) => {
       const MAX_SIZE = 90 * 1024 * 1024;
-      const newFilesToAdd: EvidenceFile[] = [];
-      const filesArray = Array.from(fileList);
-
-      for (const f of filesArray) {
-          if (f.size > MAX_SIZE) continue;
-          const relativePath = (f as any).webkitRelativePath || "";
-          let baseFolder = relativePath ? (relativePath.split('/').slice(-2, -1)[0] || "Raiz") : "Raiz";
-          
-          if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
-              try {
-                  const pages = await splitPdf(f);
-                  const originalDocId = Math.random().toString(36).substr(2, 9);
-                  const volumeFolderName = f.name.replace(/\.[^/.]+$/, "");
-                  const fullFolder = baseFolder === "Raiz" ? volumeFolderName : `${baseFolder}/${volumeFolderName}`;
-
-                  pages.forEach(p => {
-                      newFilesToAdd.push({
-                          id: Math.random().toString(36).substr(2, 9),
-                          file: p.pageFile,
-                          name: p.pageFile.name,
-                          folder: fullFolder,
-                          type: 'PDF',
-                          category: category,
-                          size: p.pageFile.size,
-                          originalDocId: originalDocId,
-                          pageNumber: p.pageNumber,
-                          totalPages: pages.length
-                      });
-                  });
-              } catch (err) {
-                  console.error("Error splitting PDF:", err);
-                  // Fallback to original if split fails
-                  newFilesToAdd.push({ id: Math.random().toString(36).substr(2, 9), file: f, name: f.name, folder: baseFolder, type: 'PDF', category: category, size: f.size });
-              }
-          } else {
-              newFilesToAdd.push({ id: Math.random().toString(36).substr(2, 9), file: f, name: f.name, folder: baseFolder, type: getFileType(f), category: category, size: f.size });
-          }
-      }
-
       setEvidenceFiles(prevFiles => {
           const updatedFiles = [...prevFiles];
-          const filteredNewFiles: EvidenceFile[] = [];
-
-          newFilesToAdd.forEach(nf => {
-              const existingIndex = updatedFiles.findIndex(ev => ev.name === nf.name && ev.category === category);
+          const newFilesToAdd: EvidenceFile[] = [];
+          Array.from(fileList).forEach((f: File) => {
+              if (f.size > MAX_SIZE) return;
+              const relativePath = (f as any).webkitRelativePath || "";
+              let folderName = relativePath ? (relativePath.split('/').slice(-2, -1)[0] || "Raiz") : "Raiz";
+              
+              // REHYDRATION LOGIC: Check if this file name already exists as a virtual file
+              const existingIndex = updatedFiles.findIndex(ev => ev.name === f.name && ev.category === category);
               if (existingIndex !== -1) {
-                  updatedFiles[existingIndex] = { ...updatedFiles[existingIndex], file: nf.file, isVirtual: false, size: nf.size };
+                  updatedFiles[existingIndex] = { ...updatedFiles[existingIndex], file: f, isVirtual: false, size: f.size };
               } else {
-                  filteredNewFiles.push(nf);
+                  newFilesToAdd.push({ id: Math.random().toString(36).substr(2, 9), file: f, name: f.name, folder: folderName, type: getFileType(f), category: category, size: f.size });
               }
           });
-          return [...updatedFiles, ...filteredNewFiles];
+          return [...updatedFiles, ...newFilesToAdd];
       });
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, category: EvidenceCategory) => { if (e.target.files && e.target.files.length > 0) await addFiles(e.target.files, category); };
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, category: EvidenceCategory) => { if (e.target.files && e.target.files.length > 0) addFiles(e.target.files, category); };
   const handleDragOver = (e: React.DragEvent, category: EvidenceCategory) => { e.preventDefault(); setDragOverCategory(category); };
-  const handleDrop = async (e: React.DragEvent, category: EvidenceCategory) => { e.preventDefault(); setDragOverCategory(null); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) await addFiles(e.dataTransfer.files, category); };
+  const handleDrop = (e: React.DragEvent, category: EvidenceCategory) => { e.preventDefault(); setDragOverCategory(null); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files, category); };
   
-  const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
-      setNotification({ message, type });
-      setTimeout(() => setNotification(null), 5000);
-  };
-
   const handleLoadProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -369,7 +285,6 @@ const App: React.FC = () => {
   };
 
   const runProcessing = async (scope: { type: 'ALL' | 'CATEGORY' | 'FOLDER' | 'FILE', value?: string }) => {
-     console.log("Starting processing with scope:", scope);
      const unprocessed = evidenceFiles.filter(f => {
          if (f.isVirtual || project.processedData.find(pd => pd.fileId === f.id)) return false;
          if (f.file && f.file.size > 90 * 1024 * 1024) return false;
@@ -379,10 +294,7 @@ const App: React.FC = () => {
          if (scope.type === 'FILE') return f.id === scope.value;
          return false;
      });
-     if (unprocessed.length === 0) {
-         showNotification("Todos os ficheiros deste grupo já foram processados.", "info");
-         return;
-     }
+     if (unprocessed.length === 0) return;
      abortProcessingRef.current = false;
      for (const file of unprocessed) {
          if (abortProcessingRef.current) { setProcessingQueue([]); break; }
@@ -390,102 +302,24 @@ const App: React.FC = () => {
          try {
              const result = await processFile(file);
              setProject(prev => ({ ...prev, processedData: [...prev.processedData, result] }));
-             showNotification(`Ficheiro "${file.name}" processado com sucesso.`, "success");
          } catch (e: any) {
-             handleError(e);
-             if (e.message === "API_KEY_MISSING" || isQuotaError(e)) {
-                 stopProcessing();
-                 break;
-             }
+             if (isQuotaError(e)) { setShowQuotaModal(true); stopProcessing(); break; }
+             else alert(`Erro em ${file.name}: ${e.message}`);
          } finally { setProcessingQueue(prev => prev.filter(id => id !== file.id)); }
      }
   };
 
   const stopProcessing = () => abortProcessingRef.current = true;
 
-  const handleError = (e: any) => {
-      if (e.message === "API_KEY_MISSING") {
-          handleSelectKey();
-          return;
-      }
-      if (isQuotaError(e)) setShowQuotaModal(true);
-      else showNotification(e.message, "error");
-  };
-
   const runAnalysis = async () => {
       setIsAnalyzing(true);
       try {
-          const dataToAnalyze = selectedEvidenceIds.size > 0 
-            ? project.processedData.filter(pd => selectedEvidenceIds.has(pd.fileId))
-            : project.processedData;
-
-          if (dataToAnalyze.length === 0) {
-              showNotification("Nenhum documento processado selecionado para análise.", "error");
-              return;
-          }
-
-          const report = await analyzeFactsFromEvidence(dataToAnalyze, project.facts, peopleMap, evidenceFiles);
+          const report = await analyzeFactsFromEvidence(project.processedData, project.facts, peopleMap, evidenceFiles);
           setProject(prev => ({ ...prev, savedReports: [report, ...prev.savedReports] }));
           setSelectedReportId(report.id);
           setCurrentView('analysis');
-      } catch (e: any) { handleError(e); }
+      } catch (e: any) { if (isQuotaError(e)) setShowQuotaModal(true); else alert(e.message); }
       finally { setIsAnalyzing(false); }
-  };
-
-  const runIndictmentMapping = async () => {
-      setIsAnalyzing(true);
-      try {
-          const dataToAnalyze = selectedEvidenceIds.size > 0 
-            ? project.processedData.filter(pd => selectedEvidenceIds.has(pd.fileId))
-            : project.processedData;
-
-          if (dataToAnalyze.length === 0) {
-              showNotification("Nenhum documento processado selecionado para mapeamento.", "error");
-              return;
-          }
-
-          const report = await analyzeIndictmentMapping(dataToAnalyze, project.facts, peopleMap, evidenceFiles);
-          setProject(prev => ({ ...prev, savedReports: [report, ...prev.savedReports] }));
-          setSelectedReportId(report.id);
-          setCurrentView('analysis');
-      } catch (e: any) { handleError(e); }
-      finally { setIsAnalyzing(false); }
-  };
-
-  const handleExtractArticles = async () => {
-      const indictmentFiles = evidenceFiles.filter(f => f.category === 'INDICTMENT');
-      const processedIndictments = project.processedData.filter(pd => indictmentFiles.some(f => f.id === pd.fileId));
-      
-      if (processedIndictments.length === 0) {
-          alert("Por favor, processe primeiro os ficheiros da Acusação.");
-          return;
-      }
-
-      setIsExtractingArticles(true);
-      try {
-          const articles = await extractArticlesFromIndictment(processedIndictments, (current, total) => {
-              showNotification(`A extrair artigos: Parte ${current} de ${total}...`, "info");
-          });
-          
-          if (articles.length === 0) {
-              showNotification("Não foi possível extrair nenhum artigo. Verifique os ficheiros ou tente novamente.", "error");
-              return;
-          }
-
-          const mappedArticles = articles.map(a => ({ ...a, isIndictment: true }));
-          setProject(prev => ({
-              ...prev,
-              facts: [...prev.facts, ...mappedArticles]
-          }));
-          showNotification(`${articles.length} artigos extraídos com sucesso.`, "success");
-          // Scroll to facts list
-          const factsElement = document.getElementById('facts-list-container');
-          if (factsElement) factsElement.scrollIntoView({ behavior: 'smooth' });
-      } catch (e: any) {
-          handleError(e);
-      } finally {
-          setIsExtractingArticles(false);
-      }
   };
 
   const handleChat = async () => {
@@ -496,7 +330,7 @@ const App: React.FC = () => {
       try {
           const resp = await chatWithEvidence(project.processedData, [...project.chatHistory, msg], msg.text, peopleMap, evidenceFiles);
           setProject(p => ({ ...p, chatHistory: [...p.chatHistory, { id: (Date.now()+1).toString(), role: 'model', text: resp, timestamp: Date.now() }] }));
-      } catch(e: any) { handleError(e); }
+      } catch(e: any) { if (isQuotaError(e)) setShowQuotaModal(true); else alert(`Erro: ${e.message}`); }
       finally { setIsChatting(false); }
   };
 
@@ -533,60 +367,19 @@ const App: React.FC = () => {
     }));
   };
 
-  const handleSplitPdf = async (file: EvidenceFile) => {
-      if (!file.file || file.type !== 'PDF') return;
-      setIsSplitting(file.id);
-      try {
-          const pages = await splitPdf(file.file);
-          const newFiles: EvidenceFile[] = pages.map(p => ({
-              id: Math.random().toString(36).substr(2, 9),
-              file: p.pageFile,
-              name: p.pageFile.name,
-              type: 'PDF',
-              category: file.category,
-              folder: `${file.folder || 'Geral'}/${file.name.replace('.pdf', '')}`
-          }));
-          setEvidenceFiles(prev => [...prev, ...newFiles]);
-          showNotification(`PDF "${file.name}" dividido em ${pages.length} páginas.`, "success");
-      } catch (e: any) {
-          showNotification(`Erro ao dividir PDF: ${e.message}`, "error");
-      } finally {
-          setIsSplitting(null);
-      }
-  };
-
-  const toggleEvidenceSelection = (id: string) => {
-      setSelectedEvidenceIds(prev => {
-          const next = new Set(prev);
-          if (next.has(id)) next.delete(id);
-          else next.add(id);
-          return next;
-      });
-  };
-
   const renderFileCard = (file: EvidenceFile) => {
       const isProcessed = project.processedData.some(pd => pd.fileId === file.id);
       const isProcessing = processingQueue.includes(file.id);
       const isTooLarge = file.file && file.file.size > 90 * 1024 * 1024;
-      const isSelected = selectedEvidenceIds.has(file.id);
-      
       return (
-         <div key={file.id} className={`bg-white dark:bg-slate-900 border p-2 rounded flex flex-col gap-2 transition-all mb-1 
-            ${isTooLarge ? 'border-red-500 bg-red-50/10' : 
-              file.isVirtual ? 'border-orange-200' : 
-              isSelected ? 'border-primary-500 ring-1 ring-primary-500/20' : 'border-gray-200 dark:border-slate-800'}`}>
+         <div key={file.id} className={`bg-white dark:bg-slate-900 border p-2 rounded flex flex-col gap-2 transition-all mb-1 ${isTooLarge ? 'border-red-500 bg-red-50/10' : file.isVirtual ? 'border-orange-200' : 'border-gray-200 dark:border-slate-800'}`}>
              <div className="flex items-center justify-between">
-                 <div className="flex items-center gap-2 overflow-hidden cursor-pointer" onClick={() => isProcessed && toggleEvidenceSelection(file.id)}>
-                     {isProcessed && (
-                         <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-primary-500 border-primary-500 text-white' : 'border-gray-300 dark:border-slate-700'}`}>
-                             {isSelected && <Check size={10} strokeWidth={4}/>}
-                         </div>
-                     )}
+                 <div className="flex items-center gap-2 overflow-hidden">
                      <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 text-[10px] ${file.type === 'AUDIO' ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
                          {file.type === 'AUDIO' ? <FileAudio size={12}/> : <FileText size={12}/>}
                      </div>
                      <div className="overflow-hidden">
-                         <div className="text-xs font-medium truncate w-24 dark:text-slate-300" title={file.name}>{file.name}</div>
+                         <div className="text-xs font-medium truncate w-32 dark:text-slate-300" title={file.name}>{file.name}</div>
                          <div className="flex items-center gap-2">
                              {isTooLarge ? <span className="text-[9px] text-red-600 font-bold uppercase">MUITO GRANDE</span> 
                              : file.isVirtual ? <span className="text-[9px] text-orange-500 font-bold uppercase">EM FALTA</span> 
@@ -594,23 +387,9 @@ const App: React.FC = () => {
                          </div>
                      </div>
                  </div>
-                 <div className="flex items-center gap-1">
-                     {file.type === 'PDF' && !file.isVirtual && (
-                         <button 
-                            onClick={(e) => { e.stopPropagation(); handleSplitPdf(file); }} 
-                            disabled={isSplitting === file.id}
-                            title="Dividir PDF por páginas"
-                            className="p-1.5 text-gray-400 hover:text-primary-600 disabled:opacity-50"
-                         >
-                            {isSplitting === file.id ? <Loader2 size={12} className="animate-spin"/> : <Layers size={12}/>}
-                         </button>
-                     )}
-                     {!isProcessed && !isProcessing && !file.isVirtual && !isTooLarge && (
-                        <button onClick={(e) => { e.stopPropagation(); runProcessing({ type: 'FILE', value: file.id }); }} className="p-1.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-100">
-                            <Play size={10} fill="currentColor" />
-                        </button>
-                     )}
-                     <button onClick={() => setEvidenceFiles(prev => prev.filter(f => f.id !== file.id))} className="p-1.5 text-gray-400 hover:text-red-500"><Trash2 size={12} /></button>
+                 <div className="flex items-center gap-2">
+                     {!isProcessed && !isProcessing && !file.isVirtual && !isTooLarge && (<button onClick={(e) => { e.stopPropagation(); runProcessing({ type: 'FILE', value: file.id }); }} className="p-1.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-100"><Play size={10} fill="currentColor" /></button>)}
+                     <button onClick={() => setEvidenceFiles(prev => prev.filter(f => f.id !== file.id))} className="text-gray-400 hover:text-red-500"><Trash2 size={12} /></button>
                  </div>
              </div>
          </div>
@@ -620,85 +399,30 @@ const App: React.FC = () => {
   const renderUploadSection = (title: string, category: EvidenceCategory, icon: React.ReactNode, description: string) => {
       const files = evidenceFiles.filter(f => f.category === category);
       const unprocessed = files.filter(f => !project.processedData.find(pd => pd.fileId === f.id) && !(f.file && f.file.size > 90 * 1024 * 1024)).length;
-      
-      // Group files by folder path
-      const folderGroups: Record<string, EvidenceFile[]> = {};
-      files.forEach(f => { 
-          const k = f.folder || 'Raiz'; 
-          if(!folderGroups[k]) folderGroups[k] = []; 
-          folderGroups[k].push(f); 
-      });
-
-      // Sort folder keys to ensure parent folders appear before children if we were doing a real tree
-      // For now, we'll just group them and display them with indentation if they have slashes
-      const sortedFolderKeys = Object.keys(folderGroups).sort();
-
+      const folders: Record<string, EvidenceFile[]> = {};
+      files.forEach(f => { const k = f.folder || 'Raiz'; if(!folders[k]) folders[k] = []; folders[k].push(f); });
       return (
           <div className={`bg-white dark:bg-slate-900/50 p-6 rounded-2xl border flex flex-col shadow-sm relative ${dragOverCategory === category ? 'border-primary-500 bg-blue-50' : 'border-gray-200 dark:border-slate-800'}`} onDragOver={(e) => handleDragOver(e, category)} onDrop={(e) => handleDrop(e, category)}>
-              <div className="mb-4 text-left">
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">{icon} {title}</div>
-                      {files.length > 0 && (
-                          <div className="flex gap-2">
-                              <button 
-                                onClick={() => {
-                                    const processedIds = files.filter(f => project.processedData.some(pd => pd.fileId === f.id)).map(f => f.id);
-                                    setSelectedEvidenceIds(prev => {
-                                        const next = new Set(prev);
-                                        processedIds.forEach(id => next.add(id));
-                                        return next;
-                                    });
-                                }}
-                                className="text-[9px] font-bold uppercase text-primary-600 hover:underline"
-                              >
-                                Todos
-                              </button>
-                              <button 
-                                onClick={() => {
-                                    setSelectedEvidenceIds(prev => {
-                                        const next = new Set(prev);
-                                        files.forEach(f => next.delete(f.id));
-                                        return next;
-                                    });
-                                }}
-                                className="text-[9px] font-bold uppercase text-gray-400 hover:underline"
-                              >
-                                Limpar
-                              </button>
-                          </div>
-                      )}
-                  </h3>
-                  <p className="text-xs text-gray-500 dark:text-slate-400">{description}</p>
-              </div>
+              <div className="mb-4 text-left"><h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-1">{icon} {title}</h3><p className="text-xs text-gray-500 dark:text-slate-400">{description}</p></div>
               <div className="flex gap-2 mb-4">
                 <label className="flex-1 px-3 py-2 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg text-xs font-bold cursor-pointer flex items-center justify-center gap-2 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700">
                   <FolderOpen size={14}/> Adicionar Pastas
+                  {/* Fix: Using spread to bypass TypeScript restriction on non-standard directory attributes */}
                   <input type="file" multiple {...({ webkitdirectory: "", directory: "" } as any)} onChange={(e) => handleFileUpload(e, category)} className="hidden"/>
                 </label>
               </div>
               <div className="flex-1 bg-gray-50 dark:bg-slate-925 rounded-xl border border-gray-200 dark:border-slate-800 p-2 overflow-y-auto max-h-[350px] space-y-2 mb-4">
-                  {sortedFolderKeys.map(folderPath => {
-                      const fArr = folderGroups[folderPath];
-                      const folderKey = `${category}-${folderPath}`;
+                  {Object.entries(folders).map(([name, fArr]) => {
+                      const folderKey = `${category}-${name}`;
                       const isExpanded = expandedFolders[folderKey];
                       const folderUnprocessed = fArr.filter(f => !project.processedData.find(pd => pd.fileId === f.id) && !(f.file && f.file.size > 90 * 1024 * 1024)).length;
-                      
-                      // Calculate indentation based on depth
-                      const depth = folderPath.split('/').length - 1;
-                      const displayName = folderPath.split('/').pop() || folderPath;
-
                       return (
-                          <div key={folderKey} className="border border-gray-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900/50 overflow-hidden" style={{ marginLeft: `${depth * 12}px` }}>
+                          <div key={folderKey} className="border border-gray-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900/50 overflow-hidden">
                               <div className="p-2 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-slate-800 cursor-pointer" onClick={() => toggleFolder(folderKey)}>
-                                <div className="flex items-center gap-2">
-                                    {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
-                                    <FolderOpen size={14} className={depth > 0 ? "text-blue-400" : "text-primary-500"}/>
-                                    <span className="text-xs font-bold truncate max-w-[150px] text-gray-700 dark:text-slate-300">{displayName}</span>
-                                    <span className="text-[10px] text-gray-500 dark:text-slate-500">({fArr.length})</span>
-                                </div>
+                                <div className="flex items-center gap-2">{isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<FolderOpen size={14} className="text-primary-500"/><span className="text-xs font-bold truncate max-w-[100px] text-gray-700 dark:text-slate-300">{name}</span><span className="text-[10px] text-gray-500 dark:text-slate-500">({fArr.length})</span></div>
                                 <div className="flex items-center gap-2">
                                    {folderUnprocessed > 0 && (<button onClick={(e) => { e.stopPropagation(); runProcessing({ type: 'FOLDER', value: folderKey }); }} className="p-1 text-gray-400 hover:text-green-500"><Play size={12} fill="currentColor"/></button>)}
-                                   <button onClick={(e) => { e.stopPropagation(); if(confirm(`Apagar pasta ${folderPath}?`)) setEvidenceFiles(prev => prev.filter(f => !(f.category === category && f.folder === folderPath))); }} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={12}/></button>
+                                   <button onClick={(e) => { e.stopPropagation(); if(confirm(`Apagar pasta ${name}?`)) setEvidenceFiles(prev => prev.filter(f => !(f.category === category && f.folder === name))); }} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={12}/></button>
                                 </div>
                               </div>
                               {isExpanded && <div className="p-2 bg-gray-50 dark:bg-slate-950/50 border-t border-gray-200 dark:border-slate-800">{fArr.map(renderFileCard)}</div>}
@@ -707,70 +431,15 @@ const App: React.FC = () => {
                   })}
               </div>
               {files.length > 0 && (
-                 <div className="flex flex-col gap-2">
-                    <button onClick={() => runProcessing({ type: 'CATEGORY', value: category })} disabled={unprocessed === 0 || processingQueue.length > 0} className="w-full py-2.5 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-xs font-bold disabled:bg-gray-300 dark:disabled:bg-slate-800 disabled:text-gray-500 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-primary-900/20">
-                        {processingQueue.length > 0 ? <Loader2 size={14} className="animate-spin"/> : <Layers size={14}/>} Processar ({unprocessed})
-                    </button>
-                    {category === 'INDICTMENT' && (
-                        <button 
-                            onClick={handleExtractArticles} 
-                            disabled={isExtractingArticles || unprocessed > 0 || files.length === 0} 
-                            className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold disabled:bg-gray-300 dark:disabled:bg-slate-800 disabled:text-gray-500 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-amber-900/20"
-                        >
-                            {isExtractingArticles ? <Loader2 size={14} className="animate-spin"/> : <BrainCircuit size={14}/>} Extrair Artigos
-                        </button>
-                    )}
-                 </div>
+                 <button onClick={() => runProcessing({ type: 'CATEGORY', value: category })} disabled={unprocessed === 0 || processingQueue.length > 0} className="w-full py-2.5 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-xs font-bold disabled:bg-gray-300 dark:disabled:bg-slate-800 disabled:text-gray-500 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-primary-900/20">
+                   {processingQueue.length > 0 ? <Loader2 size={14} className="animate-spin"/> : <Layers size={14}/>} Processar ({unprocessed})
+                 </button>
               )}
           </div>
       );
   };
 
   const currentReport = project.savedReports.find(r => r.id === selectedReportId) || project.savedReports[0];
-
-  if (isCheckingKey) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary-500" size={48} />
-      </div>
-    );
-  }
-
-  if (!hasApiKey) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center animate-in fade-in zoom-in duration-500">
-          <div className="w-20 h-20 bg-primary-900/30 rounded-2xl flex items-center justify-center text-primary-500 mx-auto mb-6">
-            <Key size={40} />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-4">Configuração Necessária</h1>
-          <p className="text-slate-400 mb-8 leading-relaxed">
-            Para processar grandes volumes de dados e garantir a melhor performance, o Veritas requer uma chave API do Google Gemini.
-          </p>
-          <div className="space-y-4">
-            <button 
-              onClick={handleSelectKey}
-              className="w-full py-4 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold shadow-lg shadow-primary-500/20 transition-all flex items-center justify-center gap-3"
-            >
-              <Key size={20} />
-              Selecionar Chave API
-            </button>
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest">
-              Recomendado: Chave de projeto Google Cloud pago
-            </p>
-            <a 
-              href="https://ai.google.dev/gemini-api/docs/billing" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors"
-            >
-              Saiba mais sobre faturação <ExternalLink size={12} />
-            </a>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (currentView === 'landing') return (
     <div className="h-full flex flex-col items-center justify-center p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-100 via-gray-50 to-white dark:from-slate-900 dark:via-slate-950 transition-colors">
@@ -779,9 +448,7 @@ const App: React.FC = () => {
             <div>
                 <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">Veritas V2.2</h1>
                 <p className="text-gray-500 dark:text-slate-400">Sistema de Análise Forense Multimodal</p>
-                <div className="mt-4 inline-block px-3 py-1 bg-gray-200/50 dark:bg-slate-800/50 rounded-full">
-                    <p className="text-[10px] text-gray-500 dark:text-slate-500 uppercase tracking-widest font-bold">Versão: 21/04/2026</p>
-                </div>
+                <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1 uppercase tracking-widest">Versão: 21 de Abril de 2026</p>
             </div>
             <div className="flex gap-12 py-4 border-y border-gray-200 dark:border-slate-800 w-full justify-center max-w-lg">
                 <div className="flex flex-col items-center"><span className="text-3xl font-bold dark:text-white">{evidenceFiles.length}</span><span className="text-xs uppercase text-gray-500">Ficheiros</span></div>
@@ -819,7 +486,7 @@ const App: React.FC = () => {
             <div className="w-10 h-px bg-gray-200 dark:bg-slate-800 my-6"></div>
             <div className="flex flex-col gap-5 w-full items-center">
                 <button onClick={() => setIsDarkMode(!isDarkMode)} className="flex flex-col items-center gap-1 text-gray-400 hover:text-primary-600 transition-colors">{isDarkMode ? <Sun size={18}/> : <Moon size={18}/>}</button>
-                <button onClick={generateDocumentation} className="flex flex-col items-center gap-1 text-gray-400 hover:text-purple-600 transition-colors"><HelpCircle size={18}/><span className="text-[8px] font-bold uppercase">Manual</span></button>
+                <button onClick={() => setShowManual(true)} className="flex flex-col items-center gap-1 text-gray-400 hover:text-purple-600 transition-colors"><HelpCircle size={18}/><span className="text-[8px] font-bold uppercase">Manual</span></button>
                 <div className="flex flex-col items-center gap-2">
                   <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest mb-1">Projeto</span>
                   <button onClick={() => projectInputRef.current?.click()} className="flex flex-col items-center gap-1 text-gray-400 hover:text-blue-600 transition-colors"><ArrowUp size={18}/><span className="text-[8px] font-bold uppercase">Carregar</span></button>
@@ -829,37 +496,6 @@ const App: React.FC = () => {
                   <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest mb-1">Base Dados</span>
                   <button onClick={() => databaseInputRef.current?.click()} className="flex flex-col items-center gap-1 text-gray-400 hover:text-blue-600 transition-colors"><ArrowUp size={18}/><span className="text-[8px] font-bold uppercase">Carregar</span></button>
                   <button onClick={() => saveDatabaseFile(project, evidenceFiles)} className="flex flex-col items-center gap-1 text-gray-400 hover:text-blue-600 transition-colors"><ArrowDown size={18}/><span className="text-[8px] font-bold uppercase">Guardar</span></button>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest mb-1">Exportar</span>
-                  <button 
-                    onClick={async () => {
-                        setIsExporting(true);
-                        setExportProgress(0);
-                        try {
-                            await exportParsedStructureToZip(evidenceFiles, (p) => setExportProgress(p));
-                        } catch (err) {
-                            alert("Erro ao exportar: " + (err instanceof Error ? err.message : String(err)));
-                        } finally {
-                            setIsExporting(false);
-                            setExportProgress(0);
-                        }
-                    }} 
-                    disabled={isExporting || evidenceFiles.length === 0}
-                    className="flex flex-col items-center gap-1 text-gray-400 hover:text-orange-600 transition-colors disabled:opacity-30"
-                  >
-                    {isExporting ? <Loader2 size={18} className="animate-spin"/> : <Download size={18}/>}
-                    <span className="text-[8px] font-bold uppercase">
-                        {isExporting ? `A Exportar (${exportProgress.toFixed(0)}%)` : 'Estrutura'}
-                    </span>
-                  </button>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-[7px] font-black text-gray-400 uppercase tracking-widest mb-1">Config</span>
-                  <button onClick={handleSelectKey} className="flex flex-col items-center gap-1 text-gray-400 hover:text-amber-600 transition-colors">
-                    <Key size={18}/>
-                    <span className="text-[8px] font-bold uppercase">Chave API</span>
-                  </button>
                 </div>
                 <div className="w-10 h-px bg-gray-200 dark:bg-slate-800 my-4"></div>
                 <button onClick={() => { if(confirm("Limpar tudo?")) { setProject(initialProjectState); setEvidenceFiles([]); } }} className="flex flex-col items-center gap-1 text-gray-400 hover:text-emerald-500 transition-colors"><Plus size={20}/><span className="text-[8px] font-bold uppercase">Novo</span></button>
@@ -889,30 +525,17 @@ const App: React.FC = () => {
                     <div className="max-w-7xl mx-auto space-y-12 pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                             {renderUploadSection("Depoimentos", 'TESTIMONY', <Mic className="text-blue-500"/>, "Áudios e Transcrições.")}
-                            {renderUploadSection("Acusação", 'INDICTMENT', <Gavel className="text-red-500"/>, "PDF/Word da Acusação.")}
+                            {renderUploadSection("Autos de Inquirição", 'INQUIRY', <Gavel className="text-red-500"/>, "PDFs dos Autos.")}
                             {renderUploadSection("Outros Documentos", 'OTHER', <Paperclip className="text-yellow-500"/>, "Anexos e Fotos.")}
                         </div>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-8 border-t border-gray-200 dark:border-slate-800">
-                        <div id="facts-list-container" className="bg-white dark:bg-slate-900 p-8 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm text-left">
-                                <h3 className="font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
-                                    <CheckCircle2 className="text-primary-500"/> Factos a Provar
-                                    {project.facts.length > 0 && <span className="ml-2 px-2 py-0.5 bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 text-[10px] rounded-full">{project.facts.length}</span>}
-                                </h3>
+                            <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm text-left">
+                                <h3 className="font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2"><CheckCircle2 className="text-primary-500"/> Factos a Provar</h3>
                                 <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                                     {project.facts.map((fact, idx) => (
                                         <div key={fact.id} className="flex gap-4 group">
-                                            <div className="flex flex-col items-center mt-4 shrink-0">
-                                                <span className="text-[10px] font-mono text-gray-400">#{idx+1}</span>
-                                                {fact.isIndictment && <Gavel size={12} className="text-red-500 mt-1" title="Artigo da Acusação"/>}
-                                            </div>
-                                            <div className="flex-1 space-y-1">
-                                                {fact.group && (
-                                                    <div className="text-[9px] font-black uppercase text-primary-500 bg-primary-50 dark:bg-primary-900/20 px-2 py-0.5 rounded inline-block">
-                                                        {fact.group}
-                                                    </div>
-                                                )}
-                                                <textarea value={fact.text} onChange={(e) => setProject(p => ({ ...p, facts: p.facts.map(f => f.id === fact.id ? { ...f, text: e.target.value } : f) }))} className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-xl p-4 text-sm focus:border-primary-500 outline-none resize-none h-24 shadow-inner dark:text-slate-300" placeholder="Insira o facto..."/>
-                                            </div>
+                                            <span className="text-[10px] font-mono text-gray-400 mt-4">#{idx+1}</span>
+                                            <textarea value={fact.text} onChange={(e) => setProject(p => ({ ...p, facts: p.facts.map(f => f.id === fact.id ? { ...f, text: e.target.value } : f) }))} className="w-full bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-xl p-4 text-sm focus:border-primary-500 outline-none resize-none h-24 shadow-inner dark:text-slate-300" placeholder="Insira o facto..."/>
                                             <button onClick={() => setProject(p => ({ ...p, facts: p.facts.filter(f => f.id !== fact.id) }))} className="self-center p-2 text-gray-300 hover:text-red-500"><Trash2 size={18}/></button>
                                         </div>
                                     ))}
@@ -922,42 +545,10 @@ const App: React.FC = () => {
                             <div className="flex flex-col justify-center items-center p-12 border-2 border-dashed border-gray-300 dark:border-slate-800 rounded-3xl bg-white/50 dark:bg-slate-900/20 text-center">
                                 <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center text-primary-600 mb-6 shadow-xl"><PlayCircle size={32}/></div>
                                 <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-3">Análise Cruzada V2.2</h3>
-                                <p className="text-sm text-gray-500 text-center mb-4 max-w-sm">O sistema irá cruzar Depoimentos, Autos e Documentos respeitando as categorias. (Limite 90MB por ficheiro)</p>
-                                
-                                {selectedEvidenceIds.size > 0 && (
-                                    <div className="mb-6 px-4 py-2 bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 rounded-xl flex items-center gap-3 animate-in fade-in zoom-in duration-300">
-                                        <div className="w-8 h-8 rounded-full bg-primary-500 text-white flex items-center justify-center text-xs font-bold shadow-lg">
-                                            {selectedEvidenceIds.size}
-                                        </div>
-                                        <div className="text-left">
-                                            <div className="text-[10px] font-black uppercase text-primary-600 dark:text-primary-400 leading-none">Documentos Selecionados</div>
-                                            <div className="text-[9px] text-primary-500/70 dark:text-primary-400/50">A análise será focada apenas nestes ficheiros.</div>
-                                        </div>
-                                        <button onClick={() => setSelectedEvidenceIds(new Set())} className="ml-auto p-1 text-primary-400 hover:text-primary-600"><X size={14}/></button>
-                                    </div>
-                                )}
-
-                                <div className="flex flex-col gap-4 w-full max-w-sm">
-                                    <button 
-                                        onClick={runAnalysis} 
-                                        disabled={isAnalyzing || project.facts.length === 0} 
-                                        className="w-full py-4 bg-primary-600 hover:bg-primary-500 text-white rounded-full font-bold shadow-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-3"
-                                    >
-                                        {isAnalyzing ? <Loader2 className="animate-spin"/> : <BrainCircuit size={20}/>}
-                                        {isAnalyzing ? "A Analisar..." : "Gerar Relatório de Factos"}
-                                    </button>
-
-                                    {project.facts.some(f => f.isIndictment) && (
-                                        <button 
-                                            onClick={runIndictmentMapping} 
-                                            disabled={isAnalyzing} 
-                                            className="w-full py-4 bg-red-600 hover:bg-red-500 text-white rounded-full font-bold shadow-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-3"
-                                        >
-                                            {isAnalyzing ? <Loader2 className="animate-spin"/> : <Gavel size={20}/>}
-                                            {isAnalyzing ? "A Mapear..." : "Mapear Prova da Acusação"}
-                                        </button>
-                                    )}
-                                </div>
+                                <p className="text-sm text-gray-500 text-center mb-8 max-w-sm">O sistema irá cruzar Depoimentos, Autos e Documentos respeitando as categorias. (Limite 90MB por ficheiro)</p>
+                                <button onClick={runAnalysis} disabled={isAnalyzing} className="px-10 py-4 bg-primary-600 hover:bg-primary-500 text-white rounded-full font-bold shadow-2xl transition-all disabled:opacity-50 flex items-center gap-3">
+                                    {isAnalyzing ? <Loader2 className="animate-spin"/> : "Gerar Novo Relatório"}
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1151,26 +742,13 @@ const App: React.FC = () => {
         {activeEvidenceId && (
             <EvidenceViewer 
                 file={evidenceFiles.find(f => f.id === activeEvidenceId) || null}
-                allFiles={evidenceFiles}
                 processedData={project.processedData.find(pd => pd.fileId === activeEvidenceId)}
                 initialSeekSeconds={seekSeconds}
                 onClose={() => { setActiveEvidenceId(null); setSeekSeconds(null); }}
                 onRenameSpeaker={handleRenameSpeaker}
-                onSwitchFile={(id) => setActiveEvidenceId(id)}
             />
         )}
         
-        {notification && (
-            <div className={`fixed bottom-8 right-8 z-[100] p-4 rounded-xl shadow-2xl border animate-in slide-in-from-right-4 duration-300 flex items-center gap-3 max-w-md
-                ${notification.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-400' : 
-                  notification.type === 'error' ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400' : 
-                  'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-400'}`}>
-                {notification.type === 'success' ? <CheckCircle2 size={20}/> : notification.type === 'error' ? <AlertCircle size={20}/> : <AlertCircle size={20}/>}
-                <p className="text-sm font-medium">{notification.message}</p>
-                <button onClick={() => setNotification(null)} className="ml-2 text-current opacity-50 hover:opacity-100"><X size={16}/></button>
-            </div>
-        )}
-
         {isManualImportOpen && (
             <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl w-full max-w-2xl border border-gray-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-200">
@@ -1202,6 +780,28 @@ const App: React.FC = () => {
                      <p className="text-sm text-gray-500 dark:text-slate-400 mb-6 leading-relaxed">Aguarde <strong>1 minuto</strong> antes de continuar o processamento.</p>
                      <button onClick={() => setShowQuotaModal(false)} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg uppercase tracking-wider">Entendido</button>
                  </div>
+            </div>
+        )}
+
+        {showManual && (
+            <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 md:p-12">
+                <div className="bg-white dark:bg-slate-900 w-full max-w-5xl h-full rounded-3xl border border-gray-200 dark:border-slate-800 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
+                    <div className="h-16 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between px-8 shrink-0 bg-gray-50/50 dark:bg-slate-900/50">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center text-purple-600 dark:text-purple-400"><HelpCircle size={18}/></div>
+                            <h3 className="font-bold text-gray-900 dark:text-white uppercase tracking-tight">Manual de Utilizador Veritas</h3>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <button onClick={generateDocumentation} className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-lg transition-all">
+                                <Download size={14}/> Descarregar (.doc)
+                            </button>
+                            <button onClick={() => setShowManual(false)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><X size={24}/></button>
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-white dark:bg-slate-950">
+                        <div dangerouslySetInnerHTML={{ __html: getDocumentationHTML() }} />
+                    </div>
+                </div>
             </div>
         )}
     </div>
